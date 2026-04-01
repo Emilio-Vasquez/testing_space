@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Astrophysics Pipeline – Final Products</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+  <header>
+    <h1>Astrophysics Data Pipeline</h1>
+    <nav>
+      <ul>
+        <li><a href="{{ url_for('home') }}">Home</a></li>
+        {% for item in nav_items %}
+        <li><a href="{{ url_for('raw_page', slug=item.slug) }}">Raw: {{ item.title }}</a></li>
+        {% endfor %}
+      </ul>
+    </nav>
+  </header>
+  <main>
+    <h2>Final Science Products</h2>
+    {% if images %}
+    <div class="image-grid">
+      {% for img in images %}
+      <div class="image-item">
+        <img src="{{ url_for('serve_rendered', filename=img.filename) }}" alt="{{ img.title }}">
+        <p>{{ img.title }}</p>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p>No final product images found.</p>
+    {% endif %}
+  </main>
+  <footer>
+    <p>&copy; {{ current_year }} Astrophysics Pipeline</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>About</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+  <header>
+    <h1>About This Project</h1>
+    <nav>
+      <ul>
+        <li><a href="{{ url_for('home') }}">Home</a></li>
+        <li><a href="{{ url_for('live_page') }}">Live Data</a></li>
+        <li><a href="{{ url_for('processed_page') }}">Processed Data</a></li>
+        <li><a href="{{ url_for('alerts_page') }}">Alerts</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main>
+    <p>This dashboard is part of a research project exploring cybersecurity in astrophysics data pipelines.  It ingests real telemetry and space weather data, applies anomaly detection and displays results for educational and research purposes.</p>
+    <h2>Data Sources</h2>
+    <ul>
+      <li>Parker Solar Probe magnetic field and plasma data (<a href="https://spdf.gsfc.nasa.gov/pub/data/psp/coho1hr_magplasma/ascii/" target="_blank">NASA SPDF</a>)</li>
+      <li>Deep Space Network real‑time feed (<a href="https://eyes.jpl.nasa.gov/dsn/data/dsn.xml" target="_blank">NASA DSN Now</a>)</li>
+      <li>NOAA space weather indices (<a href="https://services.swpc.noaa.gov/text/" target="_blank">NOAA SWPC</a>)</li>
+    </ul>
+    <p>Source code and documentation are available in the accompanying repository.</p>
+  </main>
+</body>
+</html>

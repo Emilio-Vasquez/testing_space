@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Alerts</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+  <header>
+    <h1>Anomaly Alerts</h1>
+    <nav>
+      <ul>
+        <li><a href="{{ url_for('home') }}">Home</a></li>
+        <li><a href="{{ url_for('live_page') }}">Live Data</a></li>
+        <li><a href="{{ url_for('processed_page') }}">Processed Data</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main>
+    <ul id="alertList"></ul>
+  </main>
+  <script>
+  async function loadAlerts() {
+    const response = await fetch('/api/alerts');
+    const alerts = await response.json();
+    const list = document.getElementById('alertList');
+    if (!alerts || alerts.length === 0) {
+      list.innerHTML = '<li>No alerts.</li>';
+      return;
+    }
+    list.innerHTML = alerts.map(a => `<li>[${a.severity}] ${a.timestamp}: ${a.description}</li>`).join('');
+  }
+  loadAlerts();
+  setInterval(loadAlerts, 5000);
+  </script>
+</body>
+</html>

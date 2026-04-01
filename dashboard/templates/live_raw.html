@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Live Raw Data</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <!-- Include Chart.js from a CDN for rendering the live chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Live Raw Data</h1>
+    <nav>
+      <ul>
+        <li><a href="{{ url_for('home') }}">Home</a></li>
+        <li><a href="{{ url_for('processed_page') }}">Processed Data</a></li>
+        <li><a href="{{ url_for('alerts_page') }}">Alerts</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main>
+    <!-- Chart container for live raw data -->
+    <canvas id="liveChart" width="800" height="400"></canvas>
+    <!-- Fallback table in case Chart.js fails or no data is available -->
+    <table id="rawTable" style="display: none;">
+      <thead></thead>
+      <tbody></tbody>
+    </table>
+  </main>
+  <script>
+  // Create the initial chart instance once the DOM is loaded
+  const ctx = document.getElementById('liveChart').getContext('2d');
+  const chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Solar Wind Speed',
+          data: [],
+          fill: false,
+          tension: 0.1
+        },
+        {
+          label: 'Signal Strength (dB)',
+          data: [],
+          fill: false,
+          tension: 0.1
+        },
+        {
+          label: 'Proton Density',
+          data: [],
+          fill: false,
+          tension: 0.1
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          display: true,
+          title: {
+            display: true,
+            text: 'Timestamp'
+          }
+        },
+        y: {
+          display: true,
+          title: {
+            display: true,
+            text: 'Value'
+          }
+        }
+      },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top'
+        }
+      }
+    }
+  });
+
+  // Function to fetch live data and update the chart
+  async function loadLiveData() {
+    try {
+      const response = await fetch('/api/live');
+      const data = await response.json();
+      if (!data || data.length === 0) {
+        // No data available; fall back to table with message
+        const table = document.getElementById('rawTable');
+        table.style.display = 'table';
+        const thead = table.querySelector('thead');
+        const tbody = table.querySelector('tbody');
+        thead.innerHTML = '<tr><th colspan="3">No live data available.</th></tr>';
+        tbody.innerHTML = '';
+        return;
+      }
+      // Hide fallback table when data is present
+      document.getElementById('rawTable').style.display = 'none';
+      // Prepare arrays for timestamps and metric values
+      const labels = data.map(row => row.timestamp);
+      const solar = data.map(row => row.solar_wind_speed);
+      const signal = data.map(row => row.signal_strength_db);
+      const density = data.map(row => row.proton_density);
+      // Update chart data
+      chart.data.labels = labels;
+      chart.data.datasets[0].data = solar;
+      chart.data.datasets[1].data = signal;
+      chart.data.datasets[2].data = density;
+      chart.update();
+    } catch (err) {
+      console.error('Error loading live data:', err);
+    }
+  }
+  loadLiveData();
+  // Refresh every 5 seconds; match dashboard refresh interval
+  setInterval(loadLiveData, 5000);
+  </script>
+</body>
+</html>
