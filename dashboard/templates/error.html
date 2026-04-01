@@ -8,17 +8,10 @@
 <body>
   <header>
     <h1>Error</h1>
-    <nav>
-      <ul>
-        <li><a href="{{ url_for('home') }}">Home</a></li>
-      </ul>
-    </nav>
   </header>
   <main>
     <p>{{ message }}</p>
+    <p><a href="{{ url_for('home') }}">Return to home</a></p>
   </main>
-  <footer>
-    <p>&copy; {{ current_year or 'Astrophysics Pipeline' }}</p>
-  </footer>
 </body>
 </html>

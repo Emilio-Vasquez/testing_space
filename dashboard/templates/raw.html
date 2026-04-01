@@ -5,7 +5,6 @@
   <title>Raw Data – {{ title }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   <style>
-    /* Canvas should shrink responsively while preserving aspect ratio */
     #fitsCanvas {
       width: 100%;
       height: auto;
@@ -43,95 +42,139 @@
     <p>&copy; {{ current_year }} Astrophysics Pipeline</p>
   </footer>
   <script>
-  // Fetch and display the FITS image, stats and histogram
   document.addEventListener('DOMContentLoaded', function() {
+    // Retrieve the slug for API calls
     const slug = '{{ slug }}';
-    // Draw the raw image
-    fetch(`/api/raw_data/${slug}`)
-      .then(resp => resp.json())
-      .then(data => {
-        if (data.error) {
-          console.error(data.error);
-          return;
-        }
-        const width = data.width;
-        const height = data.height;
-        const rows = data.data;
-        const canvas = document.getElementById('fitsCanvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        const imageData = ctx.createImageData(width, height);
-        let currentRow = 0;
-        function drawNextRow() {
-          if (currentRow >= height) return;
-          const rowData = rows[currentRow];
-          for (let col = 0; col < width; col++) {
-            const value = rowData[col] || 0;
-            const index = (currentRow * width + col) * 4;
-            imageData.data[index] = value;
-            imageData.data[index + 1] = value;
-            imageData.data[index + 2] = value;
-            imageData.data[index + 3] = 255;
-          }
-          ctx.putImageData(imageData, 0, 0);
-          currentRow++;
-          // Schedule next row after a short delay to simulate streaming
-          setTimeout(drawNextRow, 30);
-        }
-        drawNextRow();
-      })
-      .catch(err => {
-        console.error('Failed to load raw data:', err);
-      });
+    const canvas = document.getElementById('fitsCanvas');
+    const ctx = canvas.getContext('2d');
+    let histogramChart;
+    // Accumulate pixel values as rows are drawn
+    let pixelAccumulator = [];
+    // How many rows to draw before updating stats/histogram
+    const updateInterval = 20;
 
-    // Fetch and display stats and histogram
-    fetch(`/api/raw_stats/${slug}`)
-      .then(resp => resp.json())
-      .then(stats => {
-        if (stats.error) {
-          console.error(stats.error);
-          return;
-        }
-        // Display stats in a list
-        const statsDiv = document.getElementById('stats');
-        statsDiv.innerHTML = `
-          <ul>
-            <li>Min: ${stats.min !== null ? stats.min.toFixed(2) : 'N/A'}</li>
-            <li>Max: ${stats.max !== null ? stats.max.toFixed(2) : 'N/A'}</li>
-            <li>Mean: ${stats.mean !== null ? stats.mean.toFixed(2) : 'N/A'}</li>
-            <li>Median: ${stats.median !== null ? stats.median.toFixed(2) : 'N/A'}</li>
-            <li>Std Dev: ${stats.std !== null ? stats.std.toFixed(2) : 'N/A'}</li>
-          </ul>
-        `;
-        // Prepare histogram data for Chart.js
-        const labels = stats.histogram.map((_, i) => `Bin ${i+1}`);
-        const counts = stats.histogram;
-        const ctxHist = document.getElementById('histogramChart').getContext('2d');
-        new Chart(ctxHist, {
+    /**
+     * Compute basic statistics and a histogram on an array of numbers.
+     * Returns an object with min, max, mean, median, std, and histogram (10 bins).
+     */
+    function computeStats(values) {
+      if (!values || values.length === 0) return null;
+      // Copy and sort values for median and min/max
+      const sorted = values.slice().sort((a, b) => a - b);
+      const n = sorted.length;
+      const sum = sorted.reduce((a, b) => a + b, 0);
+      const mean = sum / n;
+      const median = n % 2 === 0 ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2 : sorted[Math.floor(n / 2)];
+      const min = sorted[0];
+      const max = sorted[n - 1];
+      const variance = sorted.reduce((acc, v) => acc + (v - mean) * (v - mean), 0) / n;
+      const std = Math.sqrt(variance);
+      // Build histogram
+      const bins = new Array(10).fill(0);
+      const binWidth = (max - min + 1) / bins.length;
+      sorted.forEach(v => {
+        const binIndex = Math.min(bins.length - 1, Math.floor((v - min) / binWidth));
+        bins[binIndex]++;
+      });
+      return { min, max, mean, median, std, histogram: bins };
+    }
+
+    /**
+     * Update the stats display and histogram chart from the current pixel accumulator.
+     */
+    function updateStatsAndHistogram() {
+      const stats = computeStats(pixelAccumulator);
+      if (!stats) return;
+      // Update stats list
+      document.getElementById('stats').innerHTML = `
+        <ul>
+          <li>Min: ${stats.min.toFixed(2)}</li>
+          <li>Max: ${stats.max.toFixed(2)}</li>
+          <li>Mean: ${stats.mean.toFixed(2)}</li>
+          <li>Median: ${stats.median.toFixed(2)}</li>
+          <li>Std Dev: ${stats.std.toFixed(2)}</li>
+        </ul>
+      `;
+      // Update histogram
+      const labels = stats.histogram.map((_, i) => 'Bin ' + (i + 1));
+      const data = stats.histogram;
+      if (!histogramChart) {
+        const histCtx = document.getElementById('histogramChart').getContext('2d');
+        histogramChart = new Chart(histCtx, {
           type: 'bar',
           data: {
             labels: labels,
             datasets: [{
               label: 'Pixel Intensity Histogram',
-              data: counts,
+              data: data,
               backgroundColor: 'rgba(75, 192, 192, 0.2)',
               borderColor: 'rgba(75, 192, 192, 1)',
               borderWidth: 1
             }]
           },
-          options: {
-            scales: {
-              y: {
-                beginAtZero: true
-              }
-            }
-          }
+          options: { scales: { y: { beginAtZero: true } } }
         });
-      })
-      .catch(err => {
-        console.error('Failed to load raw stats:', err);
-      });
+      } else {
+        histogramChart.data.labels = labels;
+        histogramChart.data.datasets[0].data = data;
+        histogramChart.update();
+      }
+    }
+
+    /**
+     * Draw the raw image line by line with a delay between rows.  As rows
+     * are drawn, accumulate pixel values and periodically update the
+     * statistics and histogram.  This gives a sense of data streaming in
+     * real time.
+     */
+    function drawImage() {
+      fetch(`/api/raw_data/${slug}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.error) {
+            console.error(data.error);
+            return;
+          }
+          const width = data.width;
+          const height = data.height;
+          const rows = data.data;
+          canvas.width = width;
+          canvas.height = height;
+          const imageData = ctx.createImageData(width, height);
+          let currentRow = 0;
+          function drawNextRow() {
+            if (currentRow >= height) {
+              // Final update once all rows are drawn
+              updateStatsAndHistogram();
+              return;
+            }
+            const rowData = rows[currentRow];
+            // Accumulate pixel values for stats
+            pixelAccumulator.push(...rowData);
+            for (let col = 0; col < width; col++) {
+              const val = rowData[col] || 0;
+              const idx = (currentRow * width + col) * 4;
+              imageData.data[idx] = val;
+              imageData.data[idx + 1] = val;
+              imageData.data[idx + 2] = val;
+              imageData.data[idx + 3] = 255;
+            }
+            ctx.putImageData(imageData, 0, 0);
+            // Update stats/histogram periodically
+            if ((currentRow + 1) % updateInterval === 0) {
+              updateStatsAndHistogram();
+            }
+            currentRow++;
+            // Slight delay for streaming effect (increase to slow down)
+            setTimeout(drawNextRow, 20);
+          }
+          drawNextRow();
+        })
+        .catch(err => console.error('raw data error', err));
+    }
+
+    // Start streaming the image
+    drawImage();
   });
   </script>
 </body>

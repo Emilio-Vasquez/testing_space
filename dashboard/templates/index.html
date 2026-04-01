@@ -2,35 +2,51 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Astrophysics Pipeline – Final Products</title>
+  <title>Astrophysics Pipeline – Science Products</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+  <style>
+    .image-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+    }
+    .image-grid figure {
+      margin: 0;
+      width: 300px;
+      text-align: center;
+    }
+    .image-grid img {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #dee2e6;
+    }
+  </style>
 </head>
 <body>
   <header>
-    <h1>Astrophysics Data Pipeline</h1>
+    <h1>Astrophysics Pipeline – Science Products</h1>
     <nav>
       <ul>
-        <li><a href="{{ url_for('home') }}">Home</a></li>
+        <li><a href="{{ url_for('home') }}" class="active">Home</a></li>
         {% for item in nav_items %}
-        <li><a href="{{ url_for('raw_page', slug=item.slug) }}">Raw: {{ item.title }}</a></li>
+        <li><a href="{{ url_for('raw_page', slug=item.slug) }}">{{ item.title }}</a></li>
         {% endfor %}
       </ul>
     </nav>
   </header>
   <main>
-    <h2>Final Science Products</h2>
-    {% if images %}
+    <p>Below are the latest calibrated images downloaded from the MAST archive.  These represent the final science products for our selected targets.</p>
     <div class="image-grid">
       {% for img in images %}
-      <div class="image-item">
-        <img src="{{ url_for('serve_rendered', filename=img.filename) }}" alt="{{ img.title }}">
-        <p>{{ img.title }}</p>
-      </div>
+      <figure>
+        <a href="{{ url_for('serve_rendered', filename=img.filename) }}" target="_blank">
+          <img src="{{ img.url }}" alt="{{ img.label }}">
+        </a>
+        <figcaption>{{ img.label }}</figcaption>
+      </figure>
       {% endfor %}
     </div>
-    {% else %}
-    <p>No final product images found.</p>
-    {% endif %}
   </main>
   <footer>
     <p>&copy; {{ current_year }} Astrophysics Pipeline</p>
