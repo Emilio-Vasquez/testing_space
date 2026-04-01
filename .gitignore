@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment / secrets
+.env
+.env.*
+*.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code / IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test / cache
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Large scientific data
+mast_data/
+dashboard/data/fits/
+*.fits
+
+# Optional common data outputs
+*.csv
+*.parquet
+*.feather
+*.h5
+*.hdf5
+
+# Optional images generated from pipeline
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Flask / app runtime
+instance/
+*.sqlite3
