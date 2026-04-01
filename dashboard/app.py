@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 """
@@ -11,6 +12,7 @@ This version:
 - detects anomalies by comparing attacked data to the clean baseline
 - returns image annotations and histogram overlays for the raw page
 - quarantines suspicious data from downstream promotion conceptually
+- crops display-only views to the valid data footprint for cleaner raw visualization
 """
 
 from functools import lru_cache
@@ -147,25 +149,50 @@ def create_app() -> Flask:
             print(f"[ERROR] Failed to read FITS for slug '{slug}': {exc}")
             return None
 
+    def _compute_valid_crop_bounds(arr: ImageArray, eps: float = 1e-8) -> Optional[Tuple[int, int, int, int]]:
+        arr = np.asarray(arr, dtype=np.float32)
+        valid_mask = np.isfinite(arr) & (np.abs(arr) > eps)
+
+        if not valid_mask.any():
+            return None
+
+        rows = np.where(valid_mask.any(axis=1))[0]
+        cols = np.where(valid_mask.any(axis=0))[0]
+
+        if rows.size == 0 or cols.size == 0:
+            return None
+
+        r0, r1 = int(rows[0]), int(rows[-1] + 1)
+        c0, c1 = int(cols[0]), int(cols[-1] + 1)
+        return r0, r1, c0, c1
+
+    def _crop_with_bounds(arr: ImageArray, bounds: Optional[Tuple[int, int, int, int]]) -> ImageArray:
+        if bounds is None:
+            return arr
+        r0, r1, c0, c1 = bounds
+        return arr[r0:r1, c0:c1]
+
     def _normalize_to_uint8(arr: ImageArray) -> ImageArray:
         arr = np.asarray(arr, dtype=np.float32)
         finite = arr[np.isfinite(arr)]
         if finite.size == 0:
             return np.zeros(arr.shape, dtype=np.uint8)
 
-        vmin, vmax = np.percentile(finite, [0.5, 99.5])
+        vmin, vmax = np.percentile(finite, [1.0, 99.8])
         if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax <= vmin:
             vmin = float(np.min(finite))
             vmax = float(np.max(finite))
             if vmax <= vmin:
                 return np.zeros(arr.shape, dtype=np.uint8)
 
-        clipped = np.clip(np.nan_to_num(arr, nan=vmin), vmin, vmax)
-        norm = (clipped - vmin) / (vmax - vmin)
-        norm = np.clip(norm, 0.0, 1.0)
+        clipped = np.clip(
+            np.nan_to_num(arr, nan=vmin, posinf=vmax, neginf=vmin),
+            vmin,
+            vmax,
+        )
 
-        stretch_strength = 10.0
-        stretched = np.arcsinh(stretch_strength * norm) / np.arcsinh(stretch_strength)
+        scaled = (clipped - vmin) / (vmax - vmin)
+        stretched = np.arcsinh(12.0 * scaled) / np.arcsinh(12.0)
 
         return np.clip(stretched * 255.0, 0, 255).astype(np.uint8)
 
@@ -224,8 +251,18 @@ def create_app() -> Flask:
 
         elif attack_type == "salt_pepper":
             amount = float(payload.get("amount", 0.002))
-            salt_value = float(payload.get("salt_value", np.nanmax(clean[np.isfinite(clean)]) if np.isfinite(clean).any() else 255.0))
-            pepper_value = float(payload.get("pepper_value", np.nanmin(clean[np.isfinite(clean)]) if np.isfinite(clean).any() else 0.0))
+            salt_value = float(
+                payload.get(
+                    "salt_value",
+                    np.nanmax(clean[np.isfinite(clean)]) if np.isfinite(clean).any() else 255.0,
+                )
+            )
+            pepper_value = float(
+                payload.get(
+                    "pepper_value",
+                    np.nanmin(clean[np.isfinite(clean)]) if np.isfinite(clean).any() else 0.0,
+                )
+            )
             seed = int(payload.get("seed", 42))
             rng = np.random.default_rng(seed)
             total = height * width
@@ -313,17 +350,46 @@ def create_app() -> Flask:
 
         attacked_arr = _apply_attack(clean_arr, attack) if attack_active else clean_arr.copy()
         anomaly_mask, anomaly = _detect_anomalies(clean_arr, attacked_arr)
-        display_arr = _normalize_to_uint8(attacked_arr)
+
+        crop_bounds = _compute_valid_crop_bounds(clean_arr)
+        display_source = _crop_with_bounds(attacked_arr, crop_bounds)
+        display_mask = _crop_with_bounds(anomaly_mask, crop_bounds)
+
+        display_arr = _normalize_to_uint8(display_source)
+
+        display_overlay = anomaly.get("overlay")
+        if crop_bounds is not None and display_overlay is not None:
+            r0, _r1, c0, _c1 = crop_bounds
+            bbox = display_overlay.get("bbox")
+            centroid = display_overlay.get("centroid")
+            if bbox:
+                bbox["x"] = int(bbox["x"] - c0)
+                bbox["y"] = int(bbox["y"] - r0)
+            if centroid:
+                centroid["x"] = int(centroid["x"] - c0)
+                centroid["y"] = int(centroid["y"] - r0)
+
+        cropped_meta = {
+            **meta,
+            "display_shape": list(display_arr.shape),
+            "crop_bounds": {
+                "row_start": crop_bounds[0],
+                "row_end": crop_bounds[1],
+                "col_start": crop_bounds[2],
+                "col_end": crop_bounds[3],
+            } if crop_bounds is not None else None,
+        }
 
         return {
             "clean": clean_arr,
             "attacked": attacked_arr,
             "display": display_arr,
+            "display_mask": display_mask,
             "anomaly_mask": anomaly_mask,
             "anomaly": anomaly,
             "attack_active": attack_active,
             "attack": attack,
-            "meta": meta,
+            "meta": cropped_meta,
         }
 
     def _compute_histogram(values: ImageArray, bins: int = 20, value_range: Tuple[float, float] = (0, 255)) -> List[int]:
@@ -390,9 +456,9 @@ def create_app() -> Flask:
             return jsonify({"error": "Failed to parse FITS or no usable 2-D image found."}), 500
 
         display = np.asarray(view["display"], dtype=np.uint8)
-        anomaly_mask = np.asarray(view["anomaly_mask"], dtype=bool)
+        display_mask = np.asarray(view["display_mask"], dtype=bool)
         flat = display.astype(np.float32).ravel()
-        anomaly_flat = display[anomaly_mask].astype(np.float32) if anomaly_mask.any() else np.array([], dtype=np.float32)
+        anomaly_flat = display[display_mask].astype(np.float32) if display_mask.any() else np.array([], dtype=np.float32)
 
         stats = {
             "min": float(flat.min()) if flat.size else None,

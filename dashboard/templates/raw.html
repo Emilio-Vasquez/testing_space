@@ -8,35 +8,51 @@
     .canvas-wrap {
       position: relative;
       width: 100%;
-      max-width: 800px;
-      margin: 1rem auto;
+      max-width: 650px;
     }
-    #fitsCanvas,
-    #overlayCanvas {
+    .canvas-wrap.pulse-red {
+      animation: redPulse 0.9s ease-out 1;
+    }
+    @keyframes redPulse {
+      0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.0); }
+      20%  { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.35); }
+      60%  { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0.18); }
+      100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.0); }
+    }
+
+    #fitsCanvas {
       width: 100%;
       height: auto;
       display: block;
       border: 1px solid #dee2e6;
       background: #000;
     }
+
     #overlayCanvas {
       position: absolute;
       top: 0;
       left: 0;
+      width: 100%;
+      height: auto;
+      display: block;
       border: none;
       pointer-events: none;
+      background: transparent;
     }
+
     #histogramChart {
       width: 100%;
       max-width: 800px;
       margin: 1rem auto 2rem;
     }
+
     .raw-grid {
       display: grid;
       grid-template-columns: 1.7fr 1fr;
       gap: 1rem;
       align-items: start;
     }
+
     .panel {
       background: #fff;
       border: 1px solid #dee2e6;
@@ -45,6 +61,7 @@
       box-shadow: 0 2px 6px rgba(0,0,0,0.04);
       margin-bottom: 1rem;
     }
+
     .status-banner {
       max-width: 800px;
       margin: 1rem auto;
@@ -53,10 +70,12 @@
       font-weight: 600;
       border: 1px solid transparent;
     }
+
     .status-clean { background: #edf7ed; color: #1f5f2c; border-color: #b7e1c0; }
     .status-flagged { background: #fff8e1; color: #8a5a00; border-color: #f0d58a; }
     .status-quarantined { background: #fdecea; color: #8f1d1d; border-color: #f3b2ad; }
     .status-none { background: #eef2f7; color: #475467; border-color: #d0d5dd; }
+
     .status-dot {
       display: inline-block;
       width: 10px;
@@ -65,25 +84,30 @@
       margin-right: 0.5rem;
       vertical-align: middle;
     }
+
     .dot-green { background: #2e7d32; }
     .dot-yellow { background: #c88700; }
     .dot-red { background: #c62828; }
     .dot-gray { background: #667085; }
+
     .meta-list, .stats-list {
       list-style: none;
       padding: 0;
       margin: 0;
     }
+
     .meta-list li, .stats-list li {
       margin-bottom: 0.5rem;
       color: #344054;
     }
+
     .button-row {
       display: flex;
       gap: 0.75rem;
       flex-wrap: wrap;
       margin-top: 1rem;
     }
+
     .action-btn {
       border: none;
       border-radius: 6px;
@@ -91,14 +115,17 @@
       cursor: pointer;
       font-weight: 600;
     }
+
     .danger-btn {
       background: #b42318;
       color: #fff;
     }
+
     .neutral-btn {
       background: #344054;
       color: #fff;
     }
+
     .code-block {
       background: #101828;
       color: #f8fafc;
@@ -109,6 +136,7 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
+
     @media (max-width: 860px) {
       .raw-grid { grid-template-columns: 1fr; }
     }
@@ -136,7 +164,7 @@
 
     <div class="raw-grid">
       <section>
-        <div class="canvas-wrap">
+        <div id="canvasWrap" class="canvas-wrap">
           <canvas id="fitsCanvas"></canvas>
           <canvas id="overlayCanvas"></canvas>
         </div>
@@ -186,6 +214,7 @@
       const overlayCanvas = document.getElementById('overlayCanvas');
       const ctx = canvas.getContext('2d');
       const overlayCtx = overlayCanvas.getContext('2d');
+
       const statusBanner = document.getElementById('statusBanner');
       const statusText = document.getElementById('statusText');
       const statusDot = document.getElementById('statusDot');
@@ -193,11 +222,25 @@
       const metaEl = document.getElementById('meta');
       const clearAttackBtn = document.getElementById('clearAttackBtn');
       const refreshBtn = document.getElementById('refreshBtn');
-      let histogramChart;
+
+      let histogramChart = null;
+      let drawToken = 0;
+      let lastSignature = null;
+      let freezeAfterNextDraw = false;
+      let frameFrozen = false;
+
+      function pulseCanvas() {
+        const wrap = document.getElementById('canvasWrap');
+        if (!wrap) return;
+        wrap.classList.remove('pulse-red');
+        void wrap.offsetWidth;
+        wrap.classList.add('pulse-red');
+      }
 
       function setStatus(anomaly, attackActive) {
         const status = anomaly?.status || 'clean';
         const severity = anomaly?.severity || 'none';
+
         statusBanner.className = 'status-banner';
         statusDot.className = 'status-dot';
 
@@ -227,6 +270,7 @@
           `<li><strong>Source file:</strong> ${meta?.source_file || 'Unknown'}</li>`,
           `<li><strong>Selected HDU:</strong> ${meta?.selected_hdu_name || 'Unknown'} (index ${meta?.selected_hdu_index ?? 'N/A'})</li>`,
           `<li><strong>Shape:</strong> ${meta?.shape ? meta.shape.join(' × ') : 'Unknown'}</li>`,
+          `<li><strong>Display shape:</strong> ${meta?.display_shape ? meta.display_shape.join(' × ') : (meta?.shape ? meta.shape.join(' × ') : 'Unknown')}</li>`,
           `<li><strong>Original dtype:</strong> ${meta?.dtype || 'Unknown'}</li>`,
           `<li><strong>Attack type:</strong> ${attack?.attack_type || 'None active'}</li>`,
           `<li><strong>Processing status:</strong> ${anomaly?.status || 'clean'}</li>`
@@ -245,7 +289,7 @@
           `<li><strong>Std Dev:</strong> ${stats.std?.toFixed(2) ?? 'N/A'}</li>`,
           `<li><strong>Anomaly severity:</strong> ${anomaly.severity || 'none'}</li>`,
           `<li><strong>Anomaly coverage:</strong> ${anomaly.coverage_ratio ?? 0}</li>`,
-          `<li><strong>Quarantine:</strong> ${anomaly.status === 'quarantined' ? 'Yes' : 'No'}</li>`
+          `<li><strong>Quarantine:</strong> ${anomaly.status === 'quarantined' ? 'Yes (frame frozen)' : 'No'}</li>`
         ];
 
         if (overlay.centroid) {
@@ -277,6 +321,7 @@
           overlayCtx.fillStyle = 'rgba(255, 32, 32, 0.95)';
           overlayCtx.arc(overlay.centroid.x, overlay.centroid.y, 8, 0, Math.PI * 2);
           overlayCtx.fill();
+
           overlayCtx.beginPath();
           overlayCtx.strokeStyle = 'rgba(255,255,255,0.95)';
           overlayCtx.lineWidth = 2;
@@ -315,6 +360,7 @@
             },
             options: {
               responsive: true,
+              animation: false,
               plugins: {
                 legend: { position: 'top' }
               },
@@ -332,9 +378,16 @@
         }
       }
 
-      async function drawRawImage() {
+      async function drawRawImage(force=false) {
+        if (frameFrozen && !force) {
+          return;
+        }
+
+        const token = ++drawToken;
         const rawResponse = await fetch(`/api/raw_data/${slug}`);
         const rawData = await rawResponse.json();
+        if (token !== drawToken) return;
+
         if (rawData.error) {
           console.error(rawData.error);
           statusText.textContent = rawData.error;
@@ -343,20 +396,35 @@
 
         const width = rawData.width;
         const height = rawData.height;
+
         canvas.width = width;
         canvas.height = height;
         overlayCanvas.width = width;
         overlayCanvas.height = height;
+
+        ctx.clearRect(0, 0, width, height);
+        overlayCtx.clearRect(0, 0, width, height);
 
         const rows = rawData.data;
         const imageData = ctx.createImageData(width, height);
         let currentRow = 0;
 
         function drawNextRow() {
+          if (token !== drawToken) return;
+
           if (currentRow >= height) {
+            ctx.putImageData(imageData, 0, 0);
             drawOverlay(rawData.anomaly, width, height);
             setStatus(rawData.anomaly, rawData.attack_active);
             renderMeta(rawData.meta, rawData.attack, rawData.anomaly);
+
+            // Freeze the frame after rendering if quarantine was detected.
+            if (freezeAfterNextDraw && rawData.anomaly?.status === 'quarantined') {
+              frameFrozen = true;
+            } else if (rawData.anomaly?.status !== 'quarantined') {
+              frameFrozen = false;
+            }
+            freezeAfterNextDraw = false;
             return;
           }
 
@@ -369,9 +437,15 @@
             imageData.data[idx + 2] = val;
             imageData.data[idx + 3] = 255;
           }
-          ctx.putImageData(imageData, 0, 0);
+
           currentRow += 1;
-          setTimeout(drawNextRow, 6);
+
+          // Update periodically for progressive feel without re-blitting every row.
+          if (currentRow % 32 === 0 || currentRow === height) {
+            ctx.putImageData(imageData, 0, 0);
+          }
+
+          requestAnimationFrame(drawNextRow);
         }
 
         drawNextRow();
@@ -384,25 +458,57 @@
           console.error(stats.error);
           return;
         }
+
+        const signatureObj = {
+          attack_active: !!stats.attack_active,
+          attack_type: stats.attack?.attack_type || null,
+          anomaly_status: stats.anomaly?.status || 'clean',
+          anomaly_severity: stats.anomaly?.severity || 'none',
+          anomaly_score: stats.anomaly?.score ?? null
+        };
+        const signature = JSON.stringify(signatureObj);
+        const changed = (lastSignature !== signature);
+        lastSignature = signature;
+
         renderStats(stats);
         renderHistogram(stats.histogram, stats.anomaly_histogram);
+
+        if (changed) {
+          if (stats.attack_active || stats.anomaly?.status === 'quarantined' || stats.anomaly?.status === 'flagged') {
+            pulseCanvas();
+          }
+
+          if (stats.anomaly?.status === 'quarantined') {
+            freezeAfterNextDraw = true;  // draw once, then freeze
+            frameFrozen = false;
+            await drawRawImage(true);
+          } else {
+            freezeAfterNextDraw = false;
+            frameFrozen = false;
+            await drawRawImage(true);
+          }
+        }
       }
 
       async function refreshAll() {
-        await Promise.all([drawRawImage(), refreshStats()]);
+        await drawRawImage(true);
+        await refreshStats();
       }
 
       clearAttackBtn.addEventListener('click', async function() {
         await fetch(`/api/attack_clear/${slug}`, { method: 'POST' });
+        frameFrozen = false;
         await refreshAll();
       });
 
       refreshBtn.addEventListener('click', async function() {
+        frameFrozen = false;
         await refreshAll();
       });
 
       refreshAll();
-      setInterval(refreshStats, 6000);
+      // Poll faster so an attack shows up quickly even if triggered from the Raspberry Pi.
+      setInterval(refreshStats, 2000);
     });
   </script>
 </body>
