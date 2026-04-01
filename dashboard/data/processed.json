@@ -1,0 +1,26 @@
+[
+  {
+    "t_min": 59214.12345,
+    "obs_id": "RAW0001",
+    "target_name": "M31",
+    "instrument_name": "WFC3/UVIS",
+    "calibration_level": 0,
+    "obs_collection": "HST"
+  },
+  {
+    "t_min": 59215.54321,
+    "obs_id": "RAW0002",
+    "target_name": "NGC 3370",
+    "instrument_name": "ACS/WFC",
+    "calibration_level": 0,
+    "obs_collection": "HST"
+  },
+  {
+    "t_min": 59216.32145,
+    "obs_id": "RAW0003",
+    "target_name": "SN1994D",
+    "instrument_name": "STIS/CCD",
+    "calibration_level": 0,
+    "obs_collection": "HST"
+  }
+]

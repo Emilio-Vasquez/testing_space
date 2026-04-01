@@ -5,18 +5,112 @@
   <title>Raw Data – {{ title }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   <style>
-    #fitsCanvas {
+    .canvas-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 800px;
+      margin: 1rem auto;
+    }
+    #fitsCanvas,
+    #overlayCanvas {
       width: 100%;
       height: auto;
-      max-width: 800px;
-      border: 1px solid #dee2e6;
       display: block;
-      margin: 1rem auto;
+      border: 1px solid #dee2e6;
+      background: #000;
+    }
+    #overlayCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      border: none;
+      pointer-events: none;
     }
     #histogramChart {
       width: 100%;
       max-width: 800px;
+      margin: 1rem auto 2rem;
+    }
+    .raw-grid {
+      display: grid;
+      grid-template-columns: 1.7fr 1fr;
+      gap: 1rem;
+      align-items: start;
+    }
+    .panel {
+      background: #fff;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 1rem;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+      margin-bottom: 1rem;
+    }
+    .status-banner {
+      max-width: 800px;
       margin: 1rem auto;
+      padding: 0.9rem 1rem;
+      border-radius: 8px;
+      font-weight: 600;
+      border: 1px solid transparent;
+    }
+    .status-clean { background: #edf7ed; color: #1f5f2c; border-color: #b7e1c0; }
+    .status-flagged { background: #fff8e1; color: #8a5a00; border-color: #f0d58a; }
+    .status-quarantined { background: #fdecea; color: #8f1d1d; border-color: #f3b2ad; }
+    .status-none { background: #eef2f7; color: #475467; border-color: #d0d5dd; }
+    .status-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 0.5rem;
+      vertical-align: middle;
+    }
+    .dot-green { background: #2e7d32; }
+    .dot-yellow { background: #c88700; }
+    .dot-red { background: #c62828; }
+    .dot-gray { background: #667085; }
+    .meta-list, .stats-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .meta-list li, .stats-list li {
+      margin-bottom: 0.5rem;
+      color: #344054;
+    }
+    .button-row {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-top: 1rem;
+    }
+    .action-btn {
+      border: none;
+      border-radius: 6px;
+      padding: 0.7rem 1rem;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .danger-btn {
+      background: #b42318;
+      color: #fff;
+    }
+    .neutral-btn {
+      background: #344054;
+      color: #fff;
+    }
+    .code-block {
+      background: #101828;
+      color: #f8fafc;
+      padding: 0.85rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    @media (max-width: 860px) {
+      .raw-grid { grid-template-columns: 1fr; }
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -33,149 +127,283 @@
       </ul>
     </nav>
   </header>
+
   <main>
-    <canvas id="fitsCanvas"></canvas>
-    <div id="stats"></div>
-    <canvas id="histogramChart"></canvas>
+    <div id="statusBanner" class="status-banner status-none">
+      <span id="statusDot" class="status-dot dot-gray"></span>
+      <span id="statusText">Loading raw frame status...</span>
+    </div>
+
+    <div class="raw-grid">
+      <section>
+        <div class="canvas-wrap">
+          <canvas id="fitsCanvas"></canvas>
+          <canvas id="overlayCanvas"></canvas>
+        </div>
+        <canvas id="histogramChart"></canvas>
+      </section>
+
+      <aside>
+        <div class="panel">
+          <h3>Frame Status</h3>
+          <ul id="stats" class="stats-list"></ul>
+          <div class="button-row">
+            <button id="refreshBtn" class="action-btn neutral-btn">Refresh raw view</button>
+            <button id="clearAttackBtn" class="action-btn danger-btn">Clear active attack</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Dataset Metadata</h3>
+          <ul id="meta" class="meta-list"></ul>
+        </div>
+
+        <div class="panel">
+          <h3>Raspberry Pi Attack Endpoint</h3>
+          <p>Send a JSON payload from the Raspberry Pi to trigger raw-layer corruption and anomaly detection.</p>
+          <div class="code-block">POST /api/attack_ingest
+{
+  "slug": "{{ slug }}",
+  "attack_type": "hotspot",
+  "x": 820,
+  "y": 410,
+  "radius": 25,
+  "intensity": 4000
+}</div>
+        </div>
+      </aside>
+    </div>
   </main>
+
   <footer>
     <p>&copy; {{ current_year }} Astrophysics Pipeline</p>
   </footer>
+
   <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    // Retrieve the slug for API calls
-    const slug = '{{ slug }}';
-    const canvas = document.getElementById('fitsCanvas');
-    const ctx = canvas.getContext('2d');
-    let histogramChart;
-    // Accumulate pixel values as rows are drawn
-    let pixelAccumulator = [];
-    // How many rows to draw before updating stats/histogram
-    const updateInterval = 20;
+    document.addEventListener('DOMContentLoaded', function() {
+      const slug = '{{ slug }}';
+      const canvas = document.getElementById('fitsCanvas');
+      const overlayCanvas = document.getElementById('overlayCanvas');
+      const ctx = canvas.getContext('2d');
+      const overlayCtx = overlayCanvas.getContext('2d');
+      const statusBanner = document.getElementById('statusBanner');
+      const statusText = document.getElementById('statusText');
+      const statusDot = document.getElementById('statusDot');
+      const statsEl = document.getElementById('stats');
+      const metaEl = document.getElementById('meta');
+      const clearAttackBtn = document.getElementById('clearAttackBtn');
+      const refreshBtn = document.getElementById('refreshBtn');
+      let histogramChart;
 
-    /**
-     * Compute basic statistics and a histogram on an array of numbers.
-     * Returns an object with min, max, mean, median, std, and histogram (10 bins).
-     */
-    function computeStats(values) {
-      if (!values || values.length === 0) return null;
-      // Copy and sort values for median and min/max
-      const sorted = values.slice().sort((a, b) => a - b);
-      const n = sorted.length;
-      const sum = sorted.reduce((a, b) => a + b, 0);
-      const mean = sum / n;
-      const median = n % 2 === 0 ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2 : sorted[Math.floor(n / 2)];
-      const min = sorted[0];
-      const max = sorted[n - 1];
-      const variance = sorted.reduce((acc, v) => acc + (v - mean) * (v - mean), 0) / n;
-      const std = Math.sqrt(variance);
-      // Build histogram
-      const bins = new Array(10).fill(0);
-      const binWidth = (max - min + 1) / bins.length;
-      sorted.forEach(v => {
-        const binIndex = Math.min(bins.length - 1, Math.floor((v - min) / binWidth));
-        bins[binIndex]++;
-      });
-      return { min, max, mean, median, std, histogram: bins };
-    }
+      function setStatus(anomaly, attackActive) {
+        const status = anomaly?.status || 'clean';
+        const severity = anomaly?.severity || 'none';
+        statusBanner.className = 'status-banner';
+        statusDot.className = 'status-dot';
 
-    /**
-     * Update the stats display and histogram chart from the current pixel accumulator.
-     */
-    function updateStatsAndHistogram() {
-      const stats = computeStats(pixelAccumulator);
-      if (!stats) return;
-      // Update stats list
-      document.getElementById('stats').innerHTML = `
-        <ul>
-          <li>Min: ${stats.min.toFixed(2)}</li>
-          <li>Max: ${stats.max.toFixed(2)}</li>
-          <li>Mean: ${stats.mean.toFixed(2)}</li>
-          <li>Median: ${stats.median.toFixed(2)}</li>
-          <li>Std Dev: ${stats.std.toFixed(2)}</li>
-        </ul>
-      `;
-      // Update histogram
-      const labels = stats.histogram.map((_, i) => 'Bin ' + (i + 1));
-      const data = stats.histogram;
-      if (!histogramChart) {
-        const histCtx = document.getElementById('histogramChart').getContext('2d');
-        histogramChart = new Chart(histCtx, {
-          type: 'bar',
-          data: {
-            labels: labels,
-            datasets: [{
-              label: 'Pixel Intensity Histogram',
-              data: data,
-              backgroundColor: 'rgba(75, 192, 192, 0.2)',
-              borderColor: 'rgba(75, 192, 192, 1)',
-              borderWidth: 1
-            }]
-          },
-          options: { scales: { y: { beginAtZero: true } } }
-        });
-      } else {
-        histogramChart.data.labels = labels;
-        histogramChart.data.datasets[0].data = data;
-        histogramChart.update();
+        if (status === 'quarantined') {
+          statusBanner.classList.add('status-quarantined');
+          statusDot.classList.add('dot-red');
+        } else if (status === 'flagged') {
+          statusBanner.classList.add('status-flagged');
+          statusDot.classList.add('dot-yellow');
+        } else if (attackActive) {
+          statusBanner.classList.add('status-clean');
+          statusDot.classList.add('dot-green');
+        } else {
+          statusBanner.classList.add('status-none');
+          statusDot.classList.add('dot-gray');
+        }
+
+        if (attackActive && anomaly) {
+          statusText.textContent = `${anomaly.message} Severity: ${severity}. Score: ${anomaly.score}.`;
+        } else {
+          statusText.textContent = 'No active attack. Displaying trusted raw scientific data.';
+        }
       }
-    }
 
-    /**
-     * Draw the raw image line by line with a delay between rows.  As rows
-     * are drawn, accumulate pixel values and periodically update the
-     * statistics and histogram.  This gives a sense of data streaming in
-     * real time.
-     */
-    function drawImage() {
-      fetch(`/api/raw_data/${slug}`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.error) {
-            console.error(data.error);
+      function renderMeta(meta, attack, anomaly) {
+        const rows = [
+          `<li><strong>Source file:</strong> ${meta?.source_file || 'Unknown'}</li>`,
+          `<li><strong>Selected HDU:</strong> ${meta?.selected_hdu_name || 'Unknown'} (index ${meta?.selected_hdu_index ?? 'N/A'})</li>`,
+          `<li><strong>Shape:</strong> ${meta?.shape ? meta.shape.join(' × ') : 'Unknown'}</li>`,
+          `<li><strong>Original dtype:</strong> ${meta?.dtype || 'Unknown'}</li>`,
+          `<li><strong>Attack type:</strong> ${attack?.attack_type || 'None active'}</li>`,
+          `<li><strong>Processing status:</strong> ${anomaly?.status || 'clean'}</li>`
+        ];
+        metaEl.innerHTML = rows.join('');
+      }
+
+      function renderStats(stats) {
+        const anomaly = stats.anomaly || {};
+        const overlay = anomaly.overlay || {};
+        const rows = [
+          `<li><strong>Min:</strong> ${stats.min?.toFixed(2) ?? 'N/A'}</li>`,
+          `<li><strong>Max:</strong> ${stats.max?.toFixed(2) ?? 'N/A'}</li>`,
+          `<li><strong>Mean:</strong> ${stats.mean?.toFixed(2) ?? 'N/A'}</li>`,
+          `<li><strong>Median:</strong> ${stats.median?.toFixed(2) ?? 'N/A'}</li>`,
+          `<li><strong>Std Dev:</strong> ${stats.std?.toFixed(2) ?? 'N/A'}</li>`,
+          `<li><strong>Anomaly severity:</strong> ${anomaly.severity || 'none'}</li>`,
+          `<li><strong>Anomaly coverage:</strong> ${anomaly.coverage_ratio ?? 0}</li>`,
+          `<li><strong>Quarantine:</strong> ${anomaly.status === 'quarantined' ? 'Yes' : 'No'}</li>`
+        ];
+
+        if (overlay.centroid) {
+          rows.push(`<li><strong>Centroid:</strong> (${overlay.centroid.x}, ${overlay.centroid.y})</li>`);
+        }
+        if (overlay.bbox) {
+          rows.push(`<li><strong>Bounding box:</strong> ${overlay.bbox.width} × ${overlay.bbox.height}</li>`);
+        }
+        statsEl.innerHTML = rows.join('');
+      }
+
+      function drawOverlay(anomaly, width, height) {
+        overlayCanvas.width = width;
+        overlayCanvas.height = height;
+        overlayCtx.clearRect(0, 0, width, height);
+        const overlay = anomaly?.overlay;
+        if (!overlay) return;
+
+        if (overlay.bbox) {
+          overlayCtx.strokeStyle = 'rgba(255, 0, 0, 0.95)';
+          overlayCtx.fillStyle = 'rgba(255, 0, 0, 0.18)';
+          overlayCtx.lineWidth = 3;
+          overlayCtx.fillRect(overlay.bbox.x, overlay.bbox.y, overlay.bbox.width, overlay.bbox.height);
+          overlayCtx.strokeRect(overlay.bbox.x, overlay.bbox.y, overlay.bbox.width, overlay.bbox.height);
+        }
+
+        if (overlay.centroid) {
+          overlayCtx.beginPath();
+          overlayCtx.fillStyle = 'rgba(255, 32, 32, 0.95)';
+          overlayCtx.arc(overlay.centroid.x, overlay.centroid.y, 8, 0, Math.PI * 2);
+          overlayCtx.fill();
+          overlayCtx.beginPath();
+          overlayCtx.strokeStyle = 'rgba(255,255,255,0.95)';
+          overlayCtx.lineWidth = 2;
+          overlayCtx.arc(overlay.centroid.x, overlay.centroid.y, 14, 0, Math.PI * 2);
+          overlayCtx.stroke();
+        }
+      }
+
+      function renderHistogram(histogram, anomalyHistogram) {
+        const labels = histogram.map((_, i) => `Bin ${i + 1}`);
+        const histCtx = document.getElementById('histogramChart').getContext('2d');
+
+        if (!histogramChart) {
+          histogramChart = new Chart(histCtx, {
+            type: 'bar',
+            data: {
+              labels,
+              datasets: [
+                {
+                  label: 'Full raw distribution',
+                  data: histogram,
+                  backgroundColor: 'rgba(75, 192, 192, 0.35)',
+                  borderColor: 'rgba(75, 192, 192, 1)',
+                  borderWidth: 1,
+                  stack: 'combined'
+                },
+                {
+                  label: 'Anomalous contribution',
+                  data: anomalyHistogram,
+                  backgroundColor: 'rgba(220, 38, 38, 0.55)',
+                  borderColor: 'rgba(220, 38, 38, 1)',
+                  borderWidth: 1,
+                  stack: 'combined'
+                }
+              ]
+            },
+            options: {
+              responsive: true,
+              plugins: {
+                legend: { position: 'top' }
+              },
+              scales: {
+                x: { stacked: true },
+                y: { beginAtZero: true, stacked: true }
+              }
+            }
+          });
+        } else {
+          histogramChart.data.labels = labels;
+          histogramChart.data.datasets[0].data = histogram;
+          histogramChart.data.datasets[1].data = anomalyHistogram;
+          histogramChart.update();
+        }
+      }
+
+      async function drawRawImage() {
+        const rawResponse = await fetch(`/api/raw_data/${slug}`);
+        const rawData = await rawResponse.json();
+        if (rawData.error) {
+          console.error(rawData.error);
+          statusText.textContent = rawData.error;
+          return;
+        }
+
+        const width = rawData.width;
+        const height = rawData.height;
+        canvas.width = width;
+        canvas.height = height;
+        overlayCanvas.width = width;
+        overlayCanvas.height = height;
+
+        const rows = rawData.data;
+        const imageData = ctx.createImageData(width, height);
+        let currentRow = 0;
+
+        function drawNextRow() {
+          if (currentRow >= height) {
+            drawOverlay(rawData.anomaly, width, height);
+            setStatus(rawData.anomaly, rawData.attack_active);
+            renderMeta(rawData.meta, rawData.attack, rawData.anomaly);
             return;
           }
-          const width = data.width;
-          const height = data.height;
-          const rows = data.data;
-          canvas.width = width;
-          canvas.height = height;
-          const imageData = ctx.createImageData(width, height);
-          let currentRow = 0;
-          function drawNextRow() {
-            if (currentRow >= height) {
-              // Final update once all rows are drawn
-              updateStatsAndHistogram();
-              return;
-            }
-            const rowData = rows[currentRow];
-            // Accumulate pixel values for stats
-            pixelAccumulator.push(...rowData);
-            for (let col = 0; col < width; col++) {
-              const val = rowData[col] || 0;
-              const idx = (currentRow * width + col) * 4;
-              imageData.data[idx] = val;
-              imageData.data[idx + 1] = val;
-              imageData.data[idx + 2] = val;
-              imageData.data[idx + 3] = 255;
-            }
-            ctx.putImageData(imageData, 0, 0);
-            // Update stats/histogram periodically
-            if ((currentRow + 1) % updateInterval === 0) {
-              updateStatsAndHistogram();
-            }
-            currentRow++;
-            // Slight delay for streaming effect (increase to slow down)
-            setTimeout(drawNextRow, 20);
-          }
-          drawNextRow();
-        })
-        .catch(err => console.error('raw data error', err));
-    }
 
-    // Start streaming the image
-    drawImage();
-  });
+          const rowData = rows[currentRow];
+          for (let col = 0; col < width; col++) {
+            const val = rowData[col] || 0;
+            const idx = (currentRow * width + col) * 4;
+            imageData.data[idx] = val;
+            imageData.data[idx + 1] = val;
+            imageData.data[idx + 2] = val;
+            imageData.data[idx + 3] = 255;
+          }
+          ctx.putImageData(imageData, 0, 0);
+          currentRow += 1;
+          setTimeout(drawNextRow, 6);
+        }
+
+        drawNextRow();
+      }
+
+      async function refreshStats() {
+        const statsResponse = await fetch(`/api/raw_stats/${slug}`);
+        const stats = await statsResponse.json();
+        if (stats.error) {
+          console.error(stats.error);
+          return;
+        }
+        renderStats(stats);
+        renderHistogram(stats.histogram, stats.anomaly_histogram);
+      }
+
+      async function refreshAll() {
+        await Promise.all([drawRawImage(), refreshStats()]);
+      }
+
+      clearAttackBtn.addEventListener('click', async function() {
+        await fetch(`/api/attack_clear/${slug}`, { method: 'POST' });
+        await refreshAll();
+      });
+
+      refreshBtn.addEventListener('click', async function() {
+        await refreshAll();
+      });
+
+      refreshAll();
+      setInterval(refreshStats, 6000);
+    });
   </script>
 </body>
 </html>
