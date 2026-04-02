@@ -19,7 +19,6 @@
       60%  { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0.18); }
       100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.0); }
     }
-
     #fitsCanvas {
       width: 100%;
       height: auto;
@@ -27,7 +26,6 @@
       border: 1px solid #dee2e6;
       background: #000;
     }
-
     #overlayCanvas {
       position: absolute;
       top: 0;
@@ -39,20 +37,17 @@
       pointer-events: none;
       background: transparent;
     }
-
     #histogramChart {
       width: 100%;
       max-width: 800px;
       margin: 1rem auto 2rem;
     }
-
     .raw-grid {
       display: grid;
       grid-template-columns: 1.7fr 1fr;
       gap: 1rem;
       align-items: start;
     }
-
     .panel {
       background: #fff;
       border: 1px solid #dee2e6;
@@ -61,7 +56,6 @@
       box-shadow: 0 2px 6px rgba(0,0,0,0.04);
       margin-bottom: 1rem;
     }
-
     .status-banner {
       max-width: 800px;
       margin: 1rem auto;
@@ -70,12 +64,10 @@
       font-weight: 600;
       border: 1px solid transparent;
     }
-
     .status-clean { background: #edf7ed; color: #1f5f2c; border-color: #b7e1c0; }
     .status-flagged { background: #fff8e1; color: #8a5a00; border-color: #f0d58a; }
     .status-quarantined { background: #fdecea; color: #8f1d1d; border-color: #f3b2ad; }
     .status-none { background: #eef2f7; color: #475467; border-color: #d0d5dd; }
-
     .status-dot {
       display: inline-block;
       width: 10px;
@@ -84,30 +76,25 @@
       margin-right: 0.5rem;
       vertical-align: middle;
     }
-
     .dot-green { background: #2e7d32; }
     .dot-yellow { background: #c88700; }
     .dot-red { background: #c62828; }
     .dot-gray { background: #667085; }
-
     .meta-list, .stats-list {
       list-style: none;
       padding: 0;
       margin: 0;
     }
-
     .meta-list li, .stats-list li {
       margin-bottom: 0.5rem;
       color: #344054;
     }
-
     .button-row {
       display: flex;
       gap: 0.75rem;
       flex-wrap: wrap;
       margin-top: 1rem;
     }
-
     .action-btn {
       border: none;
       border-radius: 6px;
@@ -115,17 +102,30 @@
       cursor: pointer;
       font-weight: 600;
     }
-
+    .action-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
     .danger-btn {
       background: #b42318;
       color: #fff;
     }
-
     .neutral-btn {
       background: #344054;
       color: #fff;
     }
-
+    .support-btn {
+      background: #1d4ed8;
+      color: #fff;
+    }
+    .success-btn {
+      background: #047857;
+      color: #fff;
+    }
+    .warning-btn {
+      background: #b45309;
+      color: #fff;
+    }
     .code-block {
       background: #101828;
       color: #f8fafc;
@@ -136,7 +136,6 @@
       white-space: pre-wrap;
       word-break: break-word;
     }
-
     @media (max-width: 860px) {
       .raw-grid { grid-template-columns: 1fr; }
     }
@@ -177,7 +176,10 @@
           <ul id="stats" class="stats-list"></ul>
           <div class="button-row">
             <button id="refreshBtn" class="action-btn neutral-btn">Refresh raw view</button>
-            <button id="clearAttackBtn" class="action-btn danger-btn">Clear active attack</button>
+            <button id="containBtn" class="action-btn support-btn">Contain Feed</button>
+            <button id="disconnectBtn" class="action-btn danger-btn">Disconnect & Restore</button>
+            <button id="resumeBtn" class="action-btn success-btn">Resume Monitoring</button>
+            <button id="clearAttackBtn" class="action-btn warning-btn">Clear active attack</button>
           </div>
         </div>
 
@@ -220,14 +222,18 @@
       const statusDot = document.getElementById('statusDot');
       const statsEl = document.getElementById('stats');
       const metaEl = document.getElementById('meta');
-      const clearAttackBtn = document.getElementById('clearAttackBtn');
+
       const refreshBtn = document.getElementById('refreshBtn');
+      const containBtn = document.getElementById('containBtn');
+      const disconnectBtn = document.getElementById('disconnectBtn');
+      const resumeBtn = document.getElementById('resumeBtn');
+      const clearAttackBtn = document.getElementById('clearAttackBtn');
 
       let histogramChart = null;
       let drawToken = 0;
+      let drawInProgress = false;
+      let hardFreeze = false;
       let lastSignature = null;
-      let freezeAfterNextDraw = false;
-      let frameFrozen = false;
 
       function pulseCanvas() {
         const wrap = document.getElementById('canvasWrap');
@@ -237,14 +243,37 @@
         wrap.classList.add('pulse-red');
       }
 
-      function setStatus(anomaly, attackActive) {
+      function buildSignature(stats) {
+        const anomaly = stats?.anomaly || {};
+        const containment = stats?.containment || {};
+        const attack = stats?.attack || {};
+        return JSON.stringify({
+          attackActive: !!stats?.attack_active,
+          attackType: attack.attack_type || null,
+          severity: anomaly.severity || 'none',
+          status: anomaly.status || 'clean',
+          score: anomaly.score || 0,
+          contained: !!containment.contained,
+          mode: containment.mode || null,
+          disconnected: !!containment.disconnected,
+          displayMode: containment.display_mode || 'attacked',
+          blockedAttempts: containment.blocked_attempts || 0
+        });
+      }
+
+      function cancelActiveDraw() {
+        drawToken += 1;
+        drawInProgress = false;
+      }
+
+      function setStatus(anomaly, attackActive, containment) {
         const status = anomaly?.status || 'clean';
-        const severity = anomaly?.severity || 'none';
+        const contained = !!containment?.contained;
 
         statusBanner.className = 'status-banner';
         statusDot.className = 'status-dot';
 
-        if (status === 'quarantined') {
+        if (contained || status === 'quarantined') {
           statusBanner.classList.add('status-quarantined');
           statusDot.classList.add('dot-red');
         } else if (status === 'flagged') {
@@ -258,14 +287,25 @@
           statusDot.classList.add('dot-gray');
         }
 
-        if (attackActive && anomaly) {
-          statusText.textContent = `${anomaly.message} Severity: ${severity}. Score: ${anomaly.score}.`;
+        if (containment?.message) {
+          statusText.textContent = containment.message;
+        } else if (attackActive && anomaly) {
+          statusText.textContent = `${anomaly.message} Severity: ${anomaly.severity}. Score: ${anomaly.score}.`;
         } else {
           statusText.textContent = 'No active attack. Displaying trusted raw scientific data.';
         }
       }
 
-      function renderMeta(meta, attack, anomaly) {
+      function updateControls(stats) {
+        const containment = stats?.containment || {};
+        const attackActive = !!stats?.attack_active;
+        containBtn.disabled = !containment.allow_manual_contain;
+        disconnectBtn.disabled = !containment.allow_disconnect;
+        resumeBtn.disabled = !containment.allow_resume;
+        clearAttackBtn.disabled = !attackActive;
+      }
+
+      function renderMeta(meta, attack, anomaly, containment) {
         const rows = [
           `<li><strong>Source file:</strong> ${meta?.source_file || 'Unknown'}</li>`,
           `<li><strong>Selected HDU:</strong> ${meta?.selected_hdu_name || 'Unknown'} (index ${meta?.selected_hdu_index ?? 'N/A'})</li>`,
@@ -273,7 +313,11 @@
           `<li><strong>Display shape:</strong> ${meta?.display_shape ? meta.display_shape.join(' × ') : (meta?.shape ? meta.shape.join(' × ') : 'Unknown')}</li>`,
           `<li><strong>Original dtype:</strong> ${meta?.dtype || 'Unknown'}</li>`,
           `<li><strong>Attack type:</strong> ${attack?.attack_type || 'None active'}</li>`,
-          `<li><strong>Processing status:</strong> ${anomaly?.status || 'clean'}</li>`
+          `<li><strong>Processing status:</strong> ${anomaly?.status || 'clean'}</li>`,
+          `<li><strong>Containment mode:</strong> ${containment?.mode || 'None'}</li>`,
+          `<li><strong>Source disconnected:</strong> ${containment?.disconnected ? 'Yes' : 'No'}</li>`,
+          `<li><strong>Blocked attempts:</strong> ${containment?.blocked_attempts ?? 0}</li>`,
+          `<li><strong>Display mode:</strong> ${containment?.display_mode || 'attacked'}</li>`
         ];
         metaEl.innerHTML = rows.join('');
       }
@@ -281,6 +325,7 @@
       function renderStats(stats) {
         const anomaly = stats.anomaly || {};
         const overlay = anomaly.overlay || {};
+        const containment = stats.containment || {};
         const rows = [
           `<li><strong>Min:</strong> ${stats.min?.toFixed(2) ?? 'N/A'}</li>`,
           `<li><strong>Max:</strong> ${stats.max?.toFixed(2) ?? 'N/A'}</li>`,
@@ -289,7 +334,8 @@
           `<li><strong>Std Dev:</strong> ${stats.std?.toFixed(2) ?? 'N/A'}</li>`,
           `<li><strong>Anomaly severity:</strong> ${anomaly.severity || 'none'}</li>`,
           `<li><strong>Anomaly coverage:</strong> ${anomaly.coverage_ratio ?? 0}</li>`,
-          `<li><strong>Quarantine:</strong> ${anomaly.status === 'quarantined' ? 'Yes (frame frozen)' : 'No'}</li>`
+          `<li><strong>Containment:</strong> ${containment.contained ? `Yes (${containment.mode || 'manual'})` : 'No'}</li>`,
+          `<li><strong>Trusted baseline restored:</strong> ${containment.display_mode === 'clean' ? 'Yes' : 'No'}</li>`
         ];
 
         if (overlay.centroid) {
@@ -378,30 +424,35 @@
         }
       }
 
-      async function drawRawImage(force=false) {
-        if (frameFrozen && !force) {
-          return;
-        }
+      async function drawRawImage(options = {}) {
+        const { force = false, freezeAfter = false } = options;
+        if (hardFreeze && !force) return;
+        if (drawInProgress && !force) return;
 
         const token = ++drawToken;
+        drawInProgress = true;
+
         const rawResponse = await fetch(`/api/raw_data/${slug}`);
         const rawData = await rawResponse.json();
-        if (token !== drawToken) return;
+
+        if (token !== drawToken) {
+          drawInProgress = false;
+          return;
+        }
 
         if (rawData.error) {
           console.error(rawData.error);
           statusText.textContent = rawData.error;
+          drawInProgress = false;
           return;
         }
 
         const width = rawData.width;
         const height = rawData.height;
-
         canvas.width = width;
         canvas.height = height;
         overlayCanvas.width = width;
         overlayCanvas.height = height;
-
         ctx.clearRect(0, 0, width, height);
         overlayCtx.clearRect(0, 0, width, height);
 
@@ -410,21 +461,20 @@
         let currentRow = 0;
 
         function drawNextRow() {
-          if (token !== drawToken) return;
+          if (token !== drawToken) {
+            drawInProgress = false;
+            return;
+          }
 
           if (currentRow >= height) {
             ctx.putImageData(imageData, 0, 0);
             drawOverlay(rawData.anomaly, width, height);
-            setStatus(rawData.anomaly, rawData.attack_active);
-            renderMeta(rawData.meta, rawData.attack, rawData.anomaly);
-
-            // Freeze the frame after rendering if quarantine was detected.
-            if (freezeAfterNextDraw && rawData.anomaly?.status === 'quarantined') {
-              frameFrozen = true;
-            } else if (rawData.anomaly?.status !== 'quarantined') {
-              frameFrozen = false;
+            renderMeta(rawData.meta, rawData.attack, rawData.anomaly, rawData.containment);
+            setStatus(rawData.anomaly, rawData.attack_active, rawData.containment);
+            drawInProgress = false;
+            if (freezeAfter) {
+              hardFreeze = true;
             }
-            freezeAfterNextDraw = false;
             return;
           }
 
@@ -439,77 +489,143 @@
           }
 
           currentRow += 1;
-
-          // Update periodically for progressive feel without re-blitting every row.
           if (currentRow % 32 === 0 || currentRow === height) {
             ctx.putImageData(imageData, 0, 0);
           }
-
           requestAnimationFrame(drawNextRow);
         }
 
         drawNextRow();
       }
 
-      async function refreshStats() {
+      async function refreshStats(options = {}) {
+        const {
+          allowDraw = true,
+          pulseOnChange = true,
+          forceDrawOnFirst = true
+        } = options;
+
         const statsResponse = await fetch(`/api/raw_stats/${slug}`);
         const stats = await statsResponse.json();
         if (stats.error) {
           console.error(stats.error);
-          return;
+          return null;
         }
-
-        const signatureObj = {
-          attack_active: !!stats.attack_active,
-          attack_type: stats.attack?.attack_type || null,
-          anomaly_status: stats.anomaly?.status || 'clean',
-          anomaly_severity: stats.anomaly?.severity || 'none',
-          anomaly_score: stats.anomaly?.score ?? null
-        };
-        const signature = JSON.stringify(signatureObj);
-        const changed = (lastSignature !== signature);
-        lastSignature = signature;
 
         renderStats(stats);
         renderHistogram(stats.histogram, stats.anomaly_histogram);
+        setStatus(stats.anomaly, stats.attack_active, stats.containment);
+        renderMeta(stats.meta, stats.attack, stats.anomaly, stats.containment);
+        updateControls(stats);
 
-        if (changed) {
-          if (stats.attack_active || stats.anomaly?.status === 'quarantined' || stats.anomaly?.status === 'flagged') {
-            pulseCanvas();
-          }
+        const signature = buildSignature(stats);
+        const firstLoad = lastSignature === null;
+        const changed = !firstLoad && signature !== lastSignature;
+        const containedNow = !!stats.containment?.contained;
 
-          if (stats.anomaly?.status === 'quarantined') {
-            freezeAfterNextDraw = true;  // draw once, then freeze
-            frameFrozen = false;
-            await drawRawImage(true);
-          } else {
-            freezeAfterNextDraw = false;
-            frameFrozen = false;
-            await drawRawImage(true);
-          }
+        if (containedNow) {
+          hardFreeze = true;
+          cancelActiveDraw();
         }
+
+        if (allowDraw && !hardFreeze) {
+          if (firstLoad && forceDrawOnFirst) {
+            await drawRawImage({ force: true, freezeAfter: containedNow });
+          } else if (changed) {
+            if (pulseOnChange) pulseCanvas();
+            await drawRawImage({ force: true, freezeAfter: containedNow });
+          }
+        } else if (!containedNow && changed && pulseOnChange) {
+          pulseCanvas();
+        }
+
+        lastSignature = signature;
+        return stats;
       }
 
       async function refreshAll() {
-        await drawRawImage(true);
-        await refreshStats();
+        hardFreeze = false;
+        cancelActiveDraw();
+        lastSignature = null;
+        await refreshStats({ allowDraw: true, pulseOnChange: false, forceDrawOnFirst: true });
       }
 
+      async function postOnly(url) {
+        const response = await fetch(url, { method: 'POST' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          console.error(payload);
+        }
+        return payload;
+      }
+
+      async function postAndRefresh(url, options = {}) {
+        const {
+          redraw = true,
+          keepFrozen = false
+        } = options;
+
+        await postOnly(url);
+
+        if (keepFrozen) {
+          hardFreeze = true;
+          cancelActiveDraw();
+          lastSignature = null;
+          await refreshStats({ allowDraw: false, pulseOnChange: false, forceDrawOnFirst: false });
+          return;
+        }
+
+        if (redraw) {
+          hardFreeze = false;
+          cancelActiveDraw();
+          lastSignature = null;
+          await refreshStats({ allowDraw: true, pulseOnChange: false, forceDrawOnFirst: true });
+        } else {
+          await refreshStats({ allowDraw: false, pulseOnChange: false, forceDrawOnFirst: false });
+        }
+      }
+
+      containBtn.addEventListener('click', async function() {
+        hardFreeze = true;
+        cancelActiveDraw();
+        await postAndRefresh(`/api/contain/${slug}`, {
+          redraw: false,
+          keepFrozen: true
+        });
+      });
+
+      disconnectBtn.addEventListener('click', async function() {
+        await postAndRefresh(`/api/disconnect_attacker/${slug}`, {
+          redraw: true,
+          keepFrozen: false
+        });
+      });
+
+      resumeBtn.addEventListener('click', async function() {
+        await postAndRefresh(`/api/release/${slug}`, {
+          redraw: true,
+          keepFrozen: false
+        });
+      });
+
       clearAttackBtn.addEventListener('click', async function() {
-        await fetch(`/api/attack_clear/${slug}`, { method: 'POST' });
-        frameFrozen = false;
-        await refreshAll();
+        await postAndRefresh(`/api/attack_clear/${slug}`, {
+          redraw: true,
+          keepFrozen: false
+        });
       });
 
       refreshBtn.addEventListener('click', async function() {
-        frameFrozen = false;
         await refreshAll();
       });
 
       refreshAll();
-      // Poll faster so an attack shows up quickly even if triggered from the Raspberry Pi.
-      setInterval(refreshStats, 2000);
+      setInterval(() => {
+        refreshStats({ allowDraw: true, pulseOnChange: true, forceDrawOnFirst: false });
+      }, 2000);
     });
   </script>
+
+
 </body>
 </html>

@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 """
@@ -11,8 +10,8 @@ This version:
 - applies attacks only to an in-memory copy of the raw frame
 - detects anomalies by comparing attacked data to the clean baseline
 - returns image annotations and histogram overlays for the raw page
-- quarantines suspicious data from downstream promotion conceptually
 - crops display-only views to the valid data footprint for cleaner raw visualization
+- supports automatic and manual containment workflows for analyst response
 """
 
 from functools import lru_cache
@@ -25,9 +24,12 @@ from flask import Flask, jsonify, render_template, request, send_from_directory,
 
 ImageArray = np.ndarray
 AttackState = Dict[str, object]
+ContainmentState = Dict[str, object]
 
 # In-memory store of active attacks keyed by slug.
 ACTIVE_ATTACKS: Dict[str, AttackState] = {}
+# In-memory store of containment state keyed by slug.
+CONTAINMENT_STATES: Dict[str, ContainmentState] = {}
 
 
 def create_app() -> Flask:
@@ -95,6 +97,34 @@ def create_app() -> Flask:
             if slug not in PREFERRED_NAV_ORDER:
                 nav_items.append({"slug": slug, "title": title})
         return nav_items
+
+    def _default_containment_state() -> ContainmentState:
+        return {
+            "contained": False,
+            "mode": None,
+            "display_mode": "attacked",
+            "disconnected": False,
+            "blocked_attempts": 0,
+            "message": "Monitoring normally.",
+            "suppressed_attack_signature": None,
+        }
+
+    def _attack_signature(attack: Optional[AttackState]) -> Optional[str]:
+        if attack is None:
+            return None
+        return str(tuple(sorted((str(k), repr(v)) for k, v in attack.items())))
+
+    def _get_containment_state(slug: str) -> ContainmentState:
+        state = CONTAINMENT_STATES.get(slug)
+        if state is None:
+            state = _default_containment_state()
+            CONTAINMENT_STATES[slug] = state
+        return state
+
+    def _reset_containment_state(slug: str) -> ContainmentState:
+        state = _default_containment_state()
+        CONTAINMENT_STATES[slug] = state
+        return state
 
     def _find_best_image_hdu(hdul: fits.HDUList) -> Optional[Tuple[int, str, ImageArray]]:
         def normalize_hdu_data(data: object) -> Optional[ImageArray]:
@@ -339,6 +369,40 @@ def create_app() -> Flask:
             "message": message,
         }
 
+    def _summarize_containment(slug: str, anomaly: Dict[str, object], attack_active: bool) -> Dict[str, object]:
+        state = _get_containment_state(slug)
+        contained = bool(state.get("contained", False))
+        mode = state.get("mode")
+        disconnected = bool(state.get("disconnected", False))
+        display_mode = str(state.get("display_mode", "attacked"))
+        blocked_attempts = int(state.get("blocked_attempts", 0) or 0)
+
+        if contained and disconnected and display_mode == "clean":
+            message = "Analyst containment active. Suspected source disconnected and trusted baseline restored for inspection."
+        elif contained and mode == "manual":
+            message = "Manual containment active. Frame held for analyst inspection. Use Resume Monitoring to continue watching the live attack state."
+        elif contained and mode == "automatic":
+            message = "Automatic containment active due to anomaly severity. Frame frozen pending analyst review."
+        elif attack_active and anomaly.get("severity") in {"low", "medium", "high"}:
+            message = "Attack activity present. Monitoring remains active."
+        else:
+            message = "Monitoring normally."
+
+        if blocked_attempts > 0 and disconnected:
+            message += f" Blocked attack attempts since disconnect: {blocked_attempts}."
+
+        return {
+            "contained": contained,
+            "mode": mode,
+            "disconnected": disconnected,
+            "display_mode": display_mode,
+            "blocked_attempts": blocked_attempts,
+            "message": message,
+            "allow_manual_contain": not contained,
+            "allow_disconnect": contained or attack_active,
+            "allow_resume": contained or disconnected,
+        }
+
     def _prepare_raw_view(slug: str) -> Optional[Dict[str, object]]:
         payload = _load_science_image(slug)
         if payload is None:
@@ -347,17 +411,43 @@ def create_app() -> Flask:
         clean_arr, meta = payload
         attack = ACTIVE_ATTACKS.get(slug)
         attack_active = attack is not None
+        state = _get_containment_state(slug)
 
         attacked_arr = _apply_attack(clean_arr, attack) if attack_active else clean_arr.copy()
         anomaly_mask, anomaly = _detect_anomalies(clean_arr, attacked_arr)
 
-        crop_bounds = _compute_valid_crop_bounds(clean_arr)
-        display_source = _crop_with_bounds(attacked_arr, crop_bounds)
-        display_mask = _crop_with_bounds(anomaly_mask, crop_bounds)
+        attack_signature = _attack_signature(attack)
+        if (
+            attack_active
+            and anomaly.get("severity") in {"medium", "high"}
+            and not state.get("contained")
+            and state.get("suppressed_attack_signature") != attack_signature
+        ):
+            state.update(
+                {
+                    "contained": True,
+                    "mode": "automatic",
+                    "display_mode": "attacked",
+                    "message": "Automatically contained due to anomaly severity.",
+                }
+            )
 
+        display_base = clean_arr if state.get("display_mode") == "clean" else attacked_arr
+        display_mask_source = np.zeros(clean_arr.shape, dtype=bool) if state.get("display_mode") == "clean" else anomaly_mask
+        display_anomaly = dict(anomaly)
+        if state.get("display_mode") == "clean":
+            display_anomaly = {
+                **display_anomaly,
+                "overlay": None,
+                "message": "Trusted baseline restored for inspection after analyst action.",
+            }
+
+        crop_bounds = _compute_valid_crop_bounds(clean_arr)
+        display_source = _crop_with_bounds(display_base, crop_bounds)
+        display_mask = _crop_with_bounds(display_mask_source, crop_bounds)
         display_arr = _normalize_to_uint8(display_source)
 
-        display_overlay = anomaly.get("overlay")
+        display_overlay = display_anomaly.get("overlay")
         if crop_bounds is not None and display_overlay is not None:
             r0, _r1, c0, _c1 = crop_bounds
             bbox = display_overlay.get("bbox")
@@ -369,6 +459,7 @@ def create_app() -> Flask:
                 centroid["x"] = int(centroid["x"] - c0)
                 centroid["y"] = int(centroid["y"] - r0)
 
+        containment = _summarize_containment(slug, anomaly, attack_active)
         cropped_meta = {
             **meta,
             "display_shape": list(display_arr.shape),
@@ -386,9 +477,11 @@ def create_app() -> Flask:
             "display": display_arr,
             "display_mask": display_mask,
             "anomaly_mask": anomaly_mask,
-            "anomaly": anomaly,
+            "anomaly": display_anomaly,
+            "raw_anomaly": anomaly,
             "attack_active": attack_active,
             "attack": attack,
+            "containment": containment,
             "meta": cropped_meta,
         }
 
@@ -436,7 +529,6 @@ def create_app() -> Flask:
             return jsonify({"error": "Failed to parse FITS or no usable 2-D image found."}), 500
 
         arr = view["display"]
-        anomaly = view["anomaly"]
         return jsonify(
             {
                 "width": int(arr.shape[1]),
@@ -445,7 +537,8 @@ def create_app() -> Flask:
                 "meta": view["meta"],
                 "attack_active": view["attack_active"],
                 "attack": view["attack"],
-                "anomaly": anomaly,
+                "anomaly": view["anomaly"],
+                "containment": view["containment"],
             }
         )
 
@@ -471,6 +564,7 @@ def create_app() -> Flask:
             "attack_active": view["attack_active"],
             "attack": view["attack"],
             "anomaly": view["anomaly"],
+            "containment": view["containment"],
             "meta": view["meta"],
         }
         return jsonify(stats)
@@ -488,6 +582,7 @@ def create_app() -> Flask:
                 "attack_active": view["attack_active"],
                 "attack": view["attack"],
                 "anomaly": view["anomaly"],
+                "containment": view["containment"],
                 "meta": view["meta"],
             }
         )
@@ -500,11 +595,24 @@ def create_app() -> Flask:
             return jsonify({"error": message}), 400
 
         slug = str(payload.get("slug", "")).strip().lower()
+        state = _get_containment_state(slug)
+        if state.get("disconnected"):
+            state["blocked_attempts"] = int(state.get("blocked_attempts", 0) or 0) + 1
+            return jsonify(
+                {
+                    "message": "Attack source disconnected. Incoming attack blocked.",
+                    "slug": slug,
+                    "blocked": True,
+                    "containment": _summarize_containment(slug, {"severity": "none"}, slug in ACTIVE_ATTACKS),
+                }
+            ), 423
+
         ACTIVE_ATTACKS[slug] = {
             **payload,
             "slug": slug,
             "attack_type": str(payload.get("attack_type", "")).strip().lower(),
         }
+        state["suppressed_attack_signature"] = None
 
         view = _prepare_raw_view(slug)
         return jsonify(
@@ -513,6 +621,75 @@ def create_app() -> Flask:
                 "slug": slug,
                 "attack": ACTIVE_ATTACKS[slug],
                 "anomaly": view["anomaly"] if view else None,
+                "containment": view["containment"] if view else None,
+            }
+        )
+
+    @app.route("/api/contain/<slug>", methods=["POST"])
+    def api_contain(slug: str):
+        slug = slug.strip().lower()
+        if slug not in RAW_OBJECTS:
+            return jsonify({"error": "Unknown raw dataset"}), 404
+
+        state = _get_containment_state(slug)
+        state.update(
+            {
+                "contained": True,
+                "mode": "manual",
+                "display_mode": "attacked",
+                "message": "Manual containment enabled for analyst inspection.",
+            }
+        )
+        view = _prepare_raw_view(slug)
+        return jsonify(
+            {
+                "message": "Manual containment enabled.",
+                "slug": slug,
+                "containment": view["containment"] if view else state,
+            }
+        )
+
+    @app.route("/api/disconnect_attacker/<slug>", methods=["POST"])
+    def api_disconnect_attacker(slug: str):
+        slug = slug.strip().lower()
+        if slug not in RAW_OBJECTS:
+            return jsonify({"error": "Unknown raw dataset"}), 404
+
+        ACTIVE_ATTACKS.pop(slug, None)
+        state = _get_containment_state(slug)
+        state.update(
+            {
+                "contained": True,
+                "mode": state.get("mode") or "manual",
+                "display_mode": "clean",
+                "disconnected": True,
+                "message": "Suspected attack source disconnected. Trusted baseline restored.",
+            }
+        )
+        view = _prepare_raw_view(slug)
+        return jsonify(
+            {
+                "message": "Attacker disconnected and trusted baseline restored.",
+                "slug": slug,
+                "containment": view["containment"] if view else state,
+            }
+        )
+
+    @app.route("/api/release/<slug>", methods=["POST"])
+    def api_release(slug: str):
+        slug = slug.strip().lower()
+        if slug not in RAW_OBJECTS:
+            return jsonify({"error": "Unknown raw dataset"}), 404
+
+        state = _reset_containment_state(slug)
+        if slug in ACTIVE_ATTACKS:
+            state["suppressed_attack_signature"] = _attack_signature(ACTIVE_ATTACKS.get(slug))
+        view = _prepare_raw_view(slug)
+        return jsonify(
+            {
+                "message": "Containment released. Monitoring resumed.",
+                "slug": slug,
+                "containment": view["containment"] if view else state,
             }
         )
 
@@ -520,6 +697,10 @@ def create_app() -> Flask:
     def api_attack_clear(slug: str):
         slug = slug.strip().lower()
         removed = ACTIVE_ATTACKS.pop(slug, None)
+        state = _get_containment_state(slug)
+        if not state.get("disconnected"):
+            state["display_mode"] = "attacked"
+        state["suppressed_attack_signature"] = None
         return jsonify({"message": "Attack state cleared.", "slug": slug, "cleared": removed is not None})
 
     return app

@@ -42,6 +42,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
+import numpy as np
 
 import requests
 
@@ -169,7 +170,7 @@ def download_science_fits(
         subset = table[table["calib_level"] == level]
         if len(subset) == 0:
             continue
-        new = subset[~subset["obs_id"].isin(processed_ids)]
+        new = subset[~np.isin(subset["obs_id"], processed_ids)]
         if len(new) == 0:
             continue
         logger.info("Found %d new obs for %s at level %d", len(new), target_name, level)
