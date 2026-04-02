@@ -241,9 +241,9 @@
     <h1>Raw Data: {{ title }}</h1>
     <nav>
       <ul>
-        <li><a href="{{ url_for('home') }}">Home</a></li>
+        <li><a href="{{ url_for('pages_bp.home') }}">Home</a></li>
         {% for item in nav_items %}
-        <li><a href="{{ url_for('raw_page', slug=item.slug) }}"{% if item.slug == slug %} class="active"{% endif %}>{{ item.title }}</a></li>
+        <li><a href="{{ url_for('pages_bp.raw_page', slug=item.slug) }}"{% if item.slug == slug %} class="active"{% endif %}>{{ item.title }}</a></li>
         {% endfor %}
       </ul>
     </nav>

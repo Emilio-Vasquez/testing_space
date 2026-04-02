@@ -342,9 +342,9 @@
     <h1>Astrophysics Pipeline – Science Products</h1>
     <nav>
       <ul>
-        <li><a href="{{ url_for('home') }}" class="active">Home</a></li>
+        <li><a href="{{ url_for('pages_bp.home') }}" class="active">Home</a></li>
         {% for item in nav_items %}
-        <li><a href="{{ url_for('raw_page', slug=item.slug) }}">{{ item.title }}</a></li>
+        <li><a href="{{ url_for('pages_bp.raw_page', slug=item.slug) }}">{{ item.title }}</a></li>
         {% endfor %}
       </ul>
     </nav>
@@ -363,7 +363,7 @@
             </p>
             <div class="hero-actions">
               {% if nav_items %}
-              <a class="hero-btn hero-btn-primary" href="{{ url_for('raw_page', slug=nav_items[0].slug) }}">Open raw monitoring</a>
+              <a class="hero-btn hero-btn-primary" href="{{ url_for('pages_bp.raw_page', slug=nav_items[0].slug) }}">Open raw monitoring</a>
               {% endif %}
               <a class="hero-btn hero-btn-secondary" href="#science-products">Browse science products</a>
             </div>
@@ -402,7 +402,7 @@
           <div class="image-grid">
             {% for img in images %}
             <article class="product-card">
-              <a href="{{ url_for('serve_rendered', filename=img.filename) }}" target="_blank">
+              <a href="{{ url_for('pages_bp.serve_rendered', filename=img.filename) }}" target="_blank">
                 <div class="product-image-wrap">
                   <img src="{{ img.url }}" alt="{{ img.label }}">
                 </div>
@@ -429,7 +429,7 @@
             <ul class="link-list">
               {% for item in nav_items %}
               <li>
-                <a href="{{ url_for('raw_page', slug=item.slug) }}">
+                <a href="{{ url_for('pages_bp.raw_page', slug=item.slug) }}">
                   <div>{{ item.title }}</div>
                   <span>Open</span>
                 </a>
