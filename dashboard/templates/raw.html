@@ -5,139 +5,233 @@
   <title>Raw Data – {{ title }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   <style>
+    .status-banner {
+      width: min(900px, 100%);
+      margin: 0 auto 1.25rem;
+      padding: 0.95rem 1rem;
+      border-radius: 12px;
+      font-weight: 600;
+      border: 1px solid transparent;
+      box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+    }
+
+    .status-clean {
+      background: #edf7ed;
+      color: #1f5f2c;
+      border-color: #b7e1c0;
+    }
+
+    .status-flagged {
+      background: #fff8e1;
+      color: #8a5a00;
+      border-color: #f0d58a;
+    }
+
+    .status-quarantined {
+      background: #fdecea;
+      color: #8f1d1d;
+      border-color: #f3b2ad;
+    }
+
+    .status-none {
+      background: #eef2f7;
+      color: #475467;
+      border-color: #d0d5dd;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 0.55rem;
+      vertical-align: middle;
+    }
+
+    .dot-green { background: #2e7d32; }
+    .dot-yellow { background: #c88700; }
+    .dot-red { background: #c62828; }
+    .dot-gray { background: #667085; }
+
+    .raw-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(320px, 420px);
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    .left-column,
+    .right-column {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      min-width: 0;
+    }
+
+    .frame-card,
+    .panel {
+      background: #ffffff;
+      border: 1px solid #dde3ea;
+      border-radius: 14px;
+      box-shadow: 0 6px 18px rgba(16, 24, 40, 0.06);
+      padding: 1rem;
+    }
+
+    .frame-card h3,
+    .panel h3 {
+      margin-top: 0;
+      margin-bottom: 1rem;
+      color: #111827;
+    }
+
     .canvas-wrap {
       position: relative;
       width: 100%;
-      max-width: 650px;
+      max-width: 100%;
+      overflow: hidden;
+      border-radius: 12px;
+      background: #0b0f14;
+      border: 1px solid #d8dee6;
     }
+
     .canvas-wrap.pulse-red {
       animation: redPulse 0.9s ease-out 1;
     }
+
     @keyframes redPulse {
       0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.0); }
       20%  { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0.35); }
       60%  { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0.18); }
       100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.0); }
     }
-    #fitsCanvas {
+
+    #fitsCanvas,
+    #overlayCanvas {
       width: 100%;
       height: auto;
       display: block;
-      border: 1px solid #dee2e6;
+    }
+
+    #fitsCanvas {
       background: #000;
     }
+
     #overlayCanvas {
       position: absolute;
       top: 0;
       left: 0;
-      width: 100%;
-      height: auto;
-      display: block;
       border: none;
       pointer-events: none;
       background: transparent;
     }
+
+    .chart-wrap {
+      margin-top: 1rem;
+      width: 100%;
+    }
+
     #histogramChart {
       width: 100%;
-      max-width: 800px;
-      margin: 1rem auto 2rem;
+      display: block;
     }
-    .raw-grid {
-      display: grid;
-      grid-template-columns: 1.7fr 1fr;
-      gap: 1rem;
-      align-items: start;
-    }
-    .panel {
-      background: #fff;
-      border: 1px solid #dee2e6;
-      border-radius: 8px;
-      padding: 1rem;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.04);
-      margin-bottom: 1rem;
-    }
-    .status-banner {
-      max-width: 800px;
-      margin: 1rem auto;
-      padding: 0.9rem 1rem;
-      border-radius: 8px;
-      font-weight: 600;
-      border: 1px solid transparent;
-    }
-    .status-clean { background: #edf7ed; color: #1f5f2c; border-color: #b7e1c0; }
-    .status-flagged { background: #fff8e1; color: #8a5a00; border-color: #f0d58a; }
-    .status-quarantined { background: #fdecea; color: #8f1d1d; border-color: #f3b2ad; }
-    .status-none { background: #eef2f7; color: #475467; border-color: #d0d5dd; }
-    .status-dot {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      margin-right: 0.5rem;
-      vertical-align: middle;
-    }
-    .dot-green { background: #2e7d32; }
-    .dot-yellow { background: #c88700; }
-    .dot-red { background: #c62828; }
-    .dot-gray { background: #667085; }
-    .meta-list, .stats-list {
+
+    .meta-list,
+    .stats-list {
       list-style: none;
       padding: 0;
       margin: 0;
     }
-    .meta-list li, .stats-list li {
-      margin-bottom: 0.5rem;
+
+    .meta-list li,
+    .stats-list li {
+      margin-bottom: 0.55rem;
       color: #344054;
+      line-height: 1.4;
+      word-break: break-word;
     }
+
     .button-row {
       display: flex;
       gap: 0.75rem;
       flex-wrap: wrap;
       margin-top: 1rem;
     }
+
     .action-btn {
       border: none;
-      border-radius: 6px;
-      padding: 0.7rem 1rem;
+      border-radius: 8px;
+      padding: 0.72rem 1rem;
       cursor: pointer;
       font-weight: 600;
+      transition: transform 0.15s ease, opacity 0.15s ease, filter 0.15s ease;
     }
+
+    .action-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      filter: brightness(1.03);
+    }
+
     .action-btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
+
     .danger-btn {
       background: #b42318;
       color: #fff;
     }
+
     .neutral-btn {
       background: #344054;
       color: #fff;
     }
+
     .support-btn {
       background: #1d4ed8;
       color: #fff;
     }
+
     .success-btn {
       background: #047857;
       color: #fff;
     }
+
     .warning-btn {
       background: #b45309;
       color: #fff;
     }
+
     .code-block {
       background: #101828;
       color: #f8fafc;
-      padding: 0.85rem;
-      border-radius: 8px;
+      padding: 0.9rem;
+      border-radius: 10px;
       overflow-x: auto;
       font-size: 0.9rem;
       white-space: pre-wrap;
       word-break: break-word;
+      margin-top: 0.75rem;
     }
-    @media (max-width: 860px) {
-      .raw-grid { grid-template-columns: 1fr; }
+
+    @media (max-width: 1100px) {
+      .raw-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .frame-card,
+      .panel {
+        padding: 0.85rem;
+      }
+
+      .button-row {
+        flex-direction: column;
+      }
+
+      .action-btn {
+        width: 100%;
+      }
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -156,42 +250,48 @@
   </header>
 
   <main>
-    <div id="statusBanner" class="status-banner status-none">
-      <span id="statusDot" class="status-dot dot-gray"></span>
-      <span id="statusText">Loading raw frame status...</span>
-    </div>
+    <div class="page-shell">
+      <div id="statusBanner" class="status-banner status-none">
+        <span id="statusDot" class="status-dot dot-gray"></span>
+        <span id="statusText">Loading raw frame status...</span>
+      </div>
 
-    <div class="raw-grid">
-      <section>
-        <div id="canvasWrap" class="canvas-wrap">
-          <canvas id="fitsCanvas"></canvas>
-          <canvas id="overlayCanvas"></canvas>
-        </div>
-        <canvas id="histogramChart"></canvas>
-      </section>
-
-      <aside>
-        <div class="panel">
-          <h3>Frame Status</h3>
-          <ul id="stats" class="stats-list"></ul>
-          <div class="button-row">
-            <button id="refreshBtn" class="action-btn neutral-btn">Refresh raw view</button>
-            <button id="containBtn" class="action-btn support-btn">Contain Feed</button>
-            <button id="disconnectBtn" class="action-btn danger-btn">Disconnect & Restore</button>
-            <button id="resumeBtn" class="action-btn success-btn">Resume Monitoring</button>
-            <button id="clearAttackBtn" class="action-btn warning-btn">Clear active attack</button>
+      <div class="raw-grid">
+        <section class="left-column">
+          <div class="frame-card">
+            <h3>Raw Frame Monitor</h3>
+            <div id="canvasWrap" class="canvas-wrap">
+              <canvas id="fitsCanvas"></canvas>
+              <canvas id="overlayCanvas"></canvas>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="histogramChart"></canvas>
+            </div>
           </div>
-        </div>
+        </section>
 
-        <div class="panel">
-          <h3>Dataset Metadata</h3>
-          <ul id="meta" class="meta-list"></ul>
-        </div>
+        <aside class="right-column">
+          <div class="panel">
+            <h3>Frame Status</h3>
+            <ul id="stats" class="stats-list"></ul>
+            <div class="button-row">
+              <button id="refreshBtn" class="action-btn neutral-btn">Refresh raw view</button>
+              <button id="containBtn" class="action-btn support-btn">Contain Feed</button>
+              <button id="disconnectBtn" class="action-btn danger-btn">Disconnect &amp; Restore</button>
+              <button id="resumeBtn" class="action-btn success-btn">Resume Monitoring</button>
+              <button id="clearAttackBtn" class="action-btn warning-btn">Clear active attack</button>
+            </div>
+          </div>
 
-        <div class="panel">
-          <h3>Raspberry Pi Attack Endpoint</h3>
-          <p>Send a JSON payload from the Raspberry Pi to trigger raw-layer corruption and anomaly detection.</p>
-          <div class="code-block">POST /api/attack_ingest
+          <div class="panel">
+            <h3>Dataset Metadata</h3>
+            <ul id="meta" class="meta-list"></ul>
+          </div>
+
+          <div class="panel">
+            <h3>Raspberry Pi Attack Endpoint</h3>
+            <p>Send a JSON payload from the Raspberry Pi to trigger raw-layer corruption and anomaly detection.</p>
+            <div class="code-block">POST /api/attack_ingest
 {
   "slug": "{{ slug }}",
   "attack_type": "hotspot",
@@ -200,8 +300,9 @@
   "radius": 25,
   "intensity": 4000
 }</div>
-        </div>
-      </aside>
+          </div>
+        </aside>
+      </div>
     </div>
   </main>
 
@@ -625,7 +726,5 @@
       }, 2000);
     });
   </script>
-
-
 </body>
 </html>

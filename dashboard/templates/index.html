@@ -5,21 +5,335 @@
   <title>Astrophysics Pipeline – Science Products</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
   <style>
-    .image-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      justify-content: center;
+    .home-shell {
+      display: grid;
+      gap: 1.5rem;
     }
-    .image-grid figure {
+
+    .hero-card {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #334155 100%);
+      color: #f8fafc;
+      border-radius: 20px;
+      padding: 1.75rem;
+      box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero-card::after {
+      content: "";
+      position: absolute;
+      inset: auto -40px -60px auto;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(56, 189, 248, 0.22), rgba(56, 189, 248, 0));
+      pointer-events: none;
+    }
+
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.92rem;
+      color: #cbd5e1;
+      margin-bottom: 0.85rem;
+      letter-spacing: 0.02em;
+    }
+
+    .hero-eyebrow::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #38bdf8;
+      box-shadow: 0 0 0 6px rgba(56, 189, 248, 0.12);
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
+      gap: 1.25rem;
+      align-items: end;
+      position: relative;
+      z-index: 1;
+    }
+
+    .hero-copy h2 {
+      margin: 0 0 0.85rem;
+      font-size: clamp(1.8rem, 3vw, 2.7rem);
+      line-height: 1.1;
+      color: #ffffff;
+    }
+
+    .hero-copy p {
       margin: 0;
-      width: 300px;
-      text-align: center;
+      max-width: 62ch;
+      color: #dbe7f4;
+      font-size: 1rem;
     }
-    .image-grid img {
-      max-width: 100%;
-      height: auto;
-      border: 1px solid #dee2e6;
+
+    .hero-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-top: 1.25rem;
+    }
+
+    .hero-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      font-weight: 700;
+      text-decoration: none;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    }
+
+    .hero-btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .hero-btn-primary {
+      background: #38bdf8;
+      color: #082f49;
+      box-shadow: 0 10px 24px rgba(56, 189, 248, 0.22);
+    }
+
+    .hero-btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .hero-stats {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.85rem;
+    }
+
+    .stat-card {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 1rem;
+      backdrop-filter: blur(8px);
+    }
+
+    .stat-label {
+      display: block;
+      font-size: 0.82rem;
+      color: #cbd5e1;
+      margin-bottom: 0.35rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .stat-value {
+      display: block;
+      font-size: 1.7rem;
+      font-weight: 800;
+      color: #ffffff;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.95fr);
+      gap: 1.5rem;
+      align-items: start;
+    }
+
+    .surface-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 18px;
+      padding: 1.25rem;
+      box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .section-heading h3 {
+      margin: 0;
+      font-size: 1.2rem;
+      color: #0f172a;
+    }
+
+    .section-heading p {
+      margin: 0.35rem 0 0;
+      color: #475569;
+      font-size: 0.96rem;
+    }
+
+    .image-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 1rem;
+    }
+
+    .product-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      overflow: hidden;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+      height: 100%;
+    }
+
+    .product-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 14px 28px rgba(15, 23, 42, 0.10);
+      border-color: #cbd5e1;
+    }
+
+    .product-card a {
+      color: inherit;
+      text-decoration: none;
+      display: block;
+      height: 100%;
+    }
+
+    .product-image-wrap {
+      aspect-ratio: 1 / 1;
+      background: #0f172a;
+      overflow: hidden;
+    }
+
+    .product-image-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .product-copy {
+      padding: 0.9rem 0.95rem 1rem;
+    }
+
+    .product-kicker {
+      display: inline-block;
+      margin-bottom: 0.45rem;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #0369a1;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .product-title {
+      margin: 0;
+      font-size: 1rem;
+      color: #0f172a;
+      line-height: 1.3;
+    }
+
+    .product-note {
+      margin: 0.45rem 0 0;
+      color: #475569;
+      font-size: 0.92rem;
+    }
+
+    .sidebar-stack {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .link-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 0.7rem;
+    }
+
+    .link-list a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.9rem 1rem;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      color: #0f172a;
+      text-decoration: none;
+      font-weight: 600;
+      transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+    }
+
+    .link-list a:hover {
+      background: #eff6ff;
+      border-color: #93c5fd;
+      transform: translateY(-1px);
+    }
+
+    .link-list span {
+      color: #64748b;
+      font-weight: 700;
+    }
+
+    .info-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 0.8rem;
+    }
+
+    .info-list li {
+      display: grid;
+      gap: 0.2rem;
+      padding-bottom: 0.8rem;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .info-list li:last-child {
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+
+    .info-label {
+      font-size: 0.78rem;
+      color: #64748b;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .info-value {
+      color: #0f172a;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    @media (max-width: 980px) {
+      .hero-grid,
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .hero-card,
+      .surface-card {
+        padding: 1rem;
+      }
+
+      .hero-stats {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .image-grid {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -35,19 +349,123 @@
       </ul>
     </nav>
   </header>
-  <main>
-    <p>Below are the latest calibrated images downloaded from the MAST archive.  These represent the final science products for our selected targets.</p>
-    <div class="image-grid">
-      {% for img in images %}
-      <figure>
-        <a href="{{ url_for('serve_rendered', filename=img.filename) }}" target="_blank">
-          <img src="{{ img.url }}" alt="{{ img.label }}">
-        </a>
-        <figcaption>{{ img.label }}</figcaption>
-      </figure>
-      {% endfor %}
+
+  <main class="page-shell">
+    <div class="home-shell">
+      <section class="hero-card">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <div class="hero-eyebrow">Scientific data integrity monitoring</div>
+            <h2>Interactive research dashboard for trusted science products and raw-frame inspection.</h2>
+            <p>
+              Review calibrated mission imagery, move into raw-frame inspection, and evaluate how anomaly detection
+              and containment workflows affect the raw scientific view without altering the trusted baseline data.
+            </p>
+            <div class="hero-actions">
+              {% if nav_items %}
+              <a class="hero-btn hero-btn-primary" href="{{ url_for('raw_page', slug=nav_items[0].slug) }}">Open raw monitoring</a>
+              {% endif %}
+              <a class="hero-btn hero-btn-secondary" href="#science-products">Browse science products</a>
+            </div>
+          </div>
+
+          <div class="hero-stats">
+            <div class="stat-card">
+              <span class="stat-label">Science products</span>
+              <span class="stat-value">{{ images|length }}</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Raw datasets</span>
+              <span class="stat-value">{{ nav_items|length }}</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Mode</span>
+              <span class="stat-value" style="font-size: 1.15rem;">Real FITS</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Containment</span>
+              <span class="stat-value" style="font-size: 1.15rem;">Enabled</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="dashboard-grid">
+        <div class="surface-card" id="science-products">
+          <div class="section-heading">
+            <div>
+              <h3>Science Products</h3>
+              <p>Final calibrated imagery surfaced as clean reference products for side-by-side project context.</p>
+            </div>
+          </div>
+
+          <div class="image-grid">
+            {% for img in images %}
+            <article class="product-card">
+              <a href="{{ url_for('serve_rendered', filename=img.filename) }}" target="_blank">
+                <div class="product-image-wrap">
+                  <img src="{{ img.url }}" alt="{{ img.label }}">
+                </div>
+                <div class="product-copy">
+                  <span class="product-kicker">Rendered product</span>
+                  <h4 class="product-title">{{ img.label }}</h4>
+                  <p class="product-note">Open the full-resolution rendered image in a separate tab.</p>
+                </div>
+              </a>
+            </article>
+            {% endfor %}
+          </div>
+        </div>
+
+        <aside class="sidebar-stack">
+          <section class="surface-card">
+            <div class="section-heading">
+              <div>
+                <h3>Raw Monitoring Views</h3>
+                <p>Jump directly into the raw scientific inspection pages.</p>
+              </div>
+            </div>
+
+            <ul class="link-list">
+              {% for item in nav_items %}
+              <li>
+                <a href="{{ url_for('raw_page', slug=item.slug) }}">
+                  <div>{{ item.title }}</div>
+                  <span>Open</span>
+                </a>
+              </li>
+              {% endfor %}
+            </ul>
+          </section>
+
+          <section class="surface-card">
+            <div class="section-heading">
+              <div>
+                <h3>Dashboard Summary</h3>
+                <p>Current layout intent for the research demo.</p>
+              </div>
+            </div>
+
+            <ul class="info-list">
+              <li>
+                <span class="info-label">Trusted baseline</span>
+                <span class="info-value">Rendered science products remain separated from the raw attack and containment workflow.</span>
+              </li>
+              <li>
+                <span class="info-label">Raw visualization</span>
+                <span class="info-value">Raw pages show real scientific frame data, anomaly overlays, histograms, and analyst response controls.</span>
+              </li>
+              <li>
+                <span class="info-label">Scrolling + footer</span>
+                <span class="info-value">The layout now uses a normal page flow so content can scroll and the footer stays below the page instead of covering content.</span>
+              </li>
+            </ul>
+          </section>
+        </aside>
+      </section>
     </div>
   </main>
+
   <footer>
     <p>&copy; {{ current_year }} Astrophysics Pipeline</p>
   </footer>
