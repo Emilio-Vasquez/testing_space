@@ -17,6 +17,7 @@ This version:
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from uuid import uuid4
 
 import numpy as np
 from astropy.io import fits
@@ -25,11 +26,14 @@ from flask import Flask, jsonify, render_template, request, send_from_directory,
 ImageArray = np.ndarray
 AttackState = Dict[str, object]
 ContainmentState = Dict[str, object]
+SessionState = Dict[str, object]
 
 # In-memory store of active attacks keyed by slug.
 ACTIVE_ATTACKS: Dict[str, AttackState] = {}
 # In-memory store of containment state keyed by slug.
 CONTAINMENT_STATES: Dict[str, ContainmentState] = {}
+# In-memory store of Raspberry Pi attack sessions keyed by session id.
+ATTACK_SESSIONS: Dict[str, SessionState] = {}
 
 
 def create_app() -> Flask:
@@ -125,6 +129,33 @@ def create_app() -> Flask:
         state = _default_containment_state()
         CONTAINMENT_STATES[slug] = state
         return state
+
+    def _default_session_state(session_id: str, slug: str, client_name: str) -> SessionState:
+        return {
+            "session_id": session_id,
+            "slug": slug,
+            "client_name": client_name,
+            "active": True,
+            "disconnect_reason": None,
+        }
+
+    def _start_attack_session(slug: str, client_name: str = "raspberry-pi") -> SessionState:
+        session_id = uuid4().hex[:12]
+        session = _default_session_state(session_id, slug, client_name)
+        ATTACK_SESSIONS[session_id] = session
+        return session
+
+    def _get_attack_session(session_id: str) -> Optional[SessionState]:
+        return ATTACK_SESSIONS.get(session_id)
+
+    def _disconnect_sessions_for_slug(slug: str, reason: str = "disconnected_by_defender") -> int:
+        disconnected_count = 0
+        for session in ATTACK_SESSIONS.values():
+            if session.get("slug") == slug and session.get("active", False):
+                session["active"] = False
+                session["disconnect_reason"] = reason
+                disconnected_count += 1
+        return disconnected_count
 
     def _find_best_image_hdu(hdul: fits.HDUList) -> Optional[Tuple[int, str, ImageArray]]:
         def normalize_hdu_data(data: object) -> Optional[ImageArray]:
@@ -237,6 +268,16 @@ def create_app() -> Flask:
         allowed = {"hotspot", "stripe_noise", "block_dropout", "salt_pepper"}
         if attack_type not in allowed:
             return False, f"Unsupported attack_type. Allowed values: {sorted(allowed)}"
+
+        session_id = str(payload.get("session_id", "")).strip()
+        if session_id:
+            session = _get_attack_session(session_id)
+            if session is None:
+                return False, "Unknown session_id."
+            if str(session.get("slug", "")).strip().lower() != slug:
+                return False, "session_id does not match slug."
+            if not session.get("active", False):
+                return False, "Session is no longer active."
         return True, "ok"
 
     def _apply_attack(clean: ImageArray, payload: AttackState) -> ImageArray:
@@ -587,6 +628,53 @@ def create_app() -> Flask:
             }
         )
 
+    @app.route("/api/session_start", methods=["POST"])
+    def api_session_start():
+        payload = request.get_json(silent=True) or {}
+        slug = str(payload.get("slug", "")).strip().lower()
+        client_name = str(payload.get("client_name", "raspberry-pi")).strip() or "raspberry-pi"
+
+        if not slug:
+            return jsonify({"error": "Missing 'slug'."}), 400
+        if slug not in RAW_OBJECTS:
+            return jsonify({"error": "Unknown slug."}), 404
+
+        state = _get_containment_state(slug)
+        if state.get("disconnected"):
+            return jsonify(
+                {
+                    "error": "Attack source currently disconnected for this dataset.",
+                    "slug": slug,
+                    "containment": _summarize_containment(slug, {"severity": "none"}, slug in ACTIVE_ATTACKS),
+                }
+            ), 423
+
+        session = _start_attack_session(slug, client_name)
+        return jsonify(
+            {
+                "message": "Attack session started.",
+                "session_id": session["session_id"],
+                "slug": slug,
+                "client_name": client_name,
+            }
+        )
+
+    @app.route("/api/session_status/<session_id>")
+    def api_session_status(session_id: str):
+        session = _get_attack_session(session_id.strip())
+        if session is None:
+            return jsonify({"error": "Unknown session_id."}), 404
+
+        return jsonify(
+            {
+                "session_id": session["session_id"],
+                "slug": session["slug"],
+                "client_name": session["client_name"],
+                "active": bool(session.get("active", False)),
+                "disconnect_reason": session.get("disconnect_reason"),
+            }
+        )
+
     @app.route("/api/attack_ingest", methods=["POST"])
     def api_attack_ingest():
         payload = request.get_json(silent=True) or {}
@@ -595,13 +683,34 @@ def create_app() -> Flask:
             return jsonify({"error": message}), 400
 
         slug = str(payload.get("slug", "")).strip().lower()
+        session_id = str(payload.get("session_id", "")).strip() or None
         state = _get_containment_state(slug)
+
+        if session_id:
+            session = _get_attack_session(session_id)
+            if session is None:
+                return jsonify({"error": "Unknown session_id."}), 404
+            if not session.get("active", False):
+                return jsonify(
+                    {
+                        "message": "Attack session inactive. Payload rejected.",
+                        "slug": slug,
+                        "session_id": session_id,
+                        "blocked": True,
+                        "disconnect_reason": session.get("disconnect_reason"),
+                    }
+                ), 423
+
         if state.get("disconnected"):
             state["blocked_attempts"] = int(state.get("blocked_attempts", 0) or 0) + 1
+            if session_id and _get_attack_session(session_id) is not None:
+                _get_attack_session(session_id)["active"] = False
+                _get_attack_session(session_id)["disconnect_reason"] = "disconnected_by_defender"
             return jsonify(
                 {
                     "message": "Attack source disconnected. Incoming attack blocked.",
                     "slug": slug,
+                    "session_id": session_id,
                     "blocked": True,
                     "containment": _summarize_containment(slug, {"severity": "none"}, slug in ACTIVE_ATTACKS),
                 }
@@ -619,6 +728,7 @@ def create_app() -> Flask:
             {
                 "message": "Attack accepted and applied to the raw visualization layer.",
                 "slug": slug,
+                "session_id": session_id,
                 "attack": ACTIVE_ATTACKS[slug],
                 "anomaly": view["anomaly"] if view else None,
                 "containment": view["containment"] if view else None,
@@ -656,6 +766,7 @@ def create_app() -> Flask:
             return jsonify({"error": "Unknown raw dataset"}), 404
 
         ACTIVE_ATTACKS.pop(slug, None)
+        disconnected_sessions = _disconnect_sessions_for_slug(slug)
         state = _get_containment_state(slug)
         state.update(
             {
@@ -671,6 +782,7 @@ def create_app() -> Flask:
             {
                 "message": "Attacker disconnected and trusted baseline restored.",
                 "slug": slug,
+                "terminated_sessions": disconnected_sessions,
                 "containment": view["containment"] if view else state,
             }
         )
